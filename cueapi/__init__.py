@@ -1,0 +1,27 @@
+"""CueAPI Python SDK — scheduling infrastructure for agents."""
+
+from cueapi.client import CueAPI
+from cueapi.exceptions import (
+    AuthenticationError,
+    CueAPIError,
+    CueAPIServerError,
+    CueLimitExceededError,
+    CueNotFoundError,
+    InvalidScheduleError,
+    RateLimitError,
+)
+from cueapi.webhook import verify_webhook
+
+__version__ = "0.1.0"
+
+__all__ = [
+    "CueAPI",
+    "verify_webhook",
+    "CueAPIError",
+    "AuthenticationError",
+    "RateLimitError",
+    "CueNotFoundError",
+    "CueLimitExceededError",
+    "InvalidScheduleError",
+    "CueAPIServerError",
+]
