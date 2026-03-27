@@ -43,7 +43,7 @@ jobs:
       - name: Checkout cueapi-core
         uses: actions/checkout@v4
         with:
-          repository: govindkavaturi-art/cueapi-core
+          repository: cueapi/cueapi-core
           path: cueapi-core
           token: ${{ secrets.GITHUB_TOKEN }}
 

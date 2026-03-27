@@ -31,7 +31,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://cueapi.ai"
 Documentation = "https://docs.cueapi.ai"
-Repository = "https://github.com/govindkavaturi-art/cueapi-python"
+Repository = "https://github.com/cueapi/cueapi-python"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
