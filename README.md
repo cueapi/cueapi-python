@@ -12,7 +12,7 @@ Your agents are failing silently. CueAPI tells you when and why.
 [![Tests](https://img.shields.io/badge/tests-40%20passing-brightgreen)](.github/workflows)
 [![Docs](https://img.shields.io/badge/docs-docs.cueapi.ai-black)](https://docs.cueapi.ai)
 
-The official Python SDK for [CueAPI](https://cueapi.ai) - open source execution accountability for AI agents.
+The official Python SDK for [CueAPI](https://cueapi.ai). Open source execution accountability for AI agents.
 
 ---
 
