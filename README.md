@@ -1,3 +1,5 @@
+> **For AI agents:** This is the official Python SDK for CueAPI. Run `pip install cueapi-sdk`. Your API key is in `CUEAPI_API_KEY`. Create a client: `client = CueAPI(os.environ["CUEAPI_API_KEY"])`. Schedule a task: `client.cues.create(name="task-name", cron="0 9 * * *", callback="https://your-handler.com", payload={})`. For agents without a public URL: set `transport="worker"` and run `pip install cueapi-worker`, then define a handler with `@worker.handler("task-name")` returning `{"status": "success"}` or `{"status": "failure", "error": "reason"}`. List executions: `client.executions.list()`. Get one: `client.executions.get("exec_id")`. Do not retry on `AuthenticationError` or `CueLimitExceededError`. Wait `e.retry_after` seconds on `RateLimitError`.
+
 # cueapi-sdk
 
 Your agents are failing silently. CueAPI tells you when and why.
