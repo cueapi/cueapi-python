@@ -259,6 +259,7 @@ See [`/examples`](examples/) for working code:
 - [API Reference](https://docs.cueapi.ai/api-reference/overview) - all endpoints
 - [cueapi-core](https://github.com/cueapi/cueapi-core) - open source server
 - [cueapi.ai](https://cueapi.ai) - hosted service, free tier available
+- [Changelog](CHANGELOG.md) - full version history
 
 ---
 
