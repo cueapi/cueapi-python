@@ -1,0 +1,26 @@
+name: SDK Staging Integration
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [cueapi-core-staging-ready]
+
+jobs:
+  sdk-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install SDK
+        run: pip install -e .
+
+      - name: Run SDK tests against staging
+        env:
+          CUEAPI_BASE_URL: ${{ secrets.CUEAPI_STAGING_URL }}
+          CUEAPI_API_KEY: ${{ secrets.CUEAPI_STAGING_API_KEY }}
+        run: pytest tests/ -v --tb=short
