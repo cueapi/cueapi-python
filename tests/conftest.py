@@ -6,8 +6,8 @@ import pytest
 
 from cueapi import CueAPI
 
-STAGING_URL = "https://api-staging-e962.up.railway.app"
-STAGING_KEY = os.environ.get("CUEAPI_TEST_KEY", "cue_sk_f22857d8225de1b862995e2baa2ccdd8")
+STAGING_URL = os.environ.get("CUEAPI_STAGING_URL", "https://api-staging.cueapi.ai")
+STAGING_KEY = os.environ.get("CUEAPI_STAGING_API_KEY", "")
 
 
 @pytest.fixture
