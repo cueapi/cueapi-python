@@ -44,6 +44,10 @@ print(f"Scheduled. Next run: {cue.next_run}")
 # Scheduled. Next run: 2026-03-28T09:00:00-08:00
 ```
 
+## See it in action
+
+![CueAPI Live Execution Feed](https://raw.githubusercontent.com/cueapi/cueapi-core/main/docs/execution-feed.gif)
+
 ---
 
 ## Why CueAPI over cron?
