@@ -46,7 +46,7 @@ print(f"Scheduled. Next run: {cue.next_run}")
 
 ## See it in action
 
-![CueAPI Live Execution Feed](https://raw.githubusercontent.com/cueapi/cueapi-core/main/docs/execution-feed.gif)
+<img src="https://raw.githubusercontent.com/cueapi/cueapi-core/main/docs/execution-feed.gif" width="100%" alt="CueAPI Live Execution Feed" />
 
 ---
 
