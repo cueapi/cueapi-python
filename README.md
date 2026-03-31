@@ -69,6 +69,10 @@ print(execution.status)       # "delivered", "failed", "retrying"
 - Worker transport with no public URL needed
 - Signed webhook payloads
 
+## See it in action
+
+![CueAPI Live Execution Feed](https://raw.githubusercontent.com/cueapi/cueapi-core/main/docs/execution-feed.gif)
+
 ---
 
 ## Two transport modes
