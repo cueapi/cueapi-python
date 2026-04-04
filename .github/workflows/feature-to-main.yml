@@ -61,7 +61,7 @@ jobs:
           ENV: test
           RESEND_API_KEY: ""
           CUEAPI_STAGING_URL: https://api-staging-e962.up.railway.app
-          CUEAPI_STAGING_API_KEY: ${{ secrets.ARGUS_CUEAPI_KEY }}
+          CUEAPI_STAGING_API_KEY: ${{ secrets.ARGUS_STAGING_KEY }}
         run: pytest tests/ -v --tb=short
 
   auto-merge:
