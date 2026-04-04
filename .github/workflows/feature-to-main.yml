@@ -19,10 +19,10 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U runner -d cueapi_test"
           --health-interval 2s
           --health-timeout 3s
-          --health-retries 10
+          --health-retries 15
 
       redis:
         image: redis:7-alpine
@@ -60,6 +60,8 @@ jobs:
           SESSION_SECRET: test-session-secret-32-chars-minimum!!
           ENV: test
           RESEND_API_KEY: ""
+          CUEAPI_STAGING_URL: https://api-staging-e962.up.railway.app
+          CUEAPI_STAGING_API_KEY: ${{ secrets.ARGUS_CUEAPI_KEY }}
         run: pytest tests/ -v --tb=short
 
   auto-merge:
