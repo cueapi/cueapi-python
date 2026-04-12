@@ -268,6 +268,12 @@ See [`/examples`](examples/) for working code:
 
 ---
 
+## Releases
+
+Releases are published to PyPI with PEP 740 attestations via GitHub Actions Trusted Publishing.
+
+---
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
