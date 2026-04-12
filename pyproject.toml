@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cueapi-sdk"
-version = "0.1.0"
+version = "0.1.1"
 description = "The official Python SDK for CueAPI — scheduling infrastructure for agents"
 readme = "README.md"
 license = { text = "MIT" }
