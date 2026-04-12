@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cueapi-sdk"
-version = "0.1.1"
+version = "0.1.2"
 description = "The official Python SDK for CueAPI — scheduling infrastructure for agents"
 readme = "README.md"
 license = { text = "MIT" }
@@ -32,6 +32,7 @@ dependencies = [
 Homepage = "https://cueapi.ai"
 Documentation = "https://docs.cueapi.ai"
 Repository = "https://github.com/cueapi/cueapi-python"
+"Bug Tracker" = "https://github.com/cueapi/cueapi-python/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

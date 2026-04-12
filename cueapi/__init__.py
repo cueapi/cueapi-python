@@ -14,7 +14,7 @@ from cueapi.payload import CuePayload
 from cueapi.resources.executions import ExecutionsResource
 from cueapi.webhook import verify_webhook
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 
 __all__ = [
     "CueAPI",
