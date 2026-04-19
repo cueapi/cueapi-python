@@ -58,6 +58,7 @@ class ExecutionsResource:
         metadata: Optional[dict] = None,
         external_id: Optional[str] = None,
         result_url: Optional[str] = None,
+        result_ref: Optional[str] = None,
         result_type: Optional[str] = None,
         summary: Optional[str] = None,
         artifacts: Optional[list] = None,
@@ -74,6 +75,8 @@ class ExecutionsResource:
             body["external_id"] = external_id
         if result_url is not None:
             body["result_url"] = result_url
+        if result_ref is not None:
+            body["result_ref"] = result_ref
         if result_type is not None:
             body["result_type"] = result_type
         if summary is not None:
