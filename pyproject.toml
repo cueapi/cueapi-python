@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cueapi-sdk"
-version = "0.1.3"
+version = "0.2.0"
 description = "Official Python SDK for CueAPI — open-source execution accountability primitive for AI agents. Schedule agent work, require evidence-backed outcomes, and gate execution with write-once verification."
 readme = "README.md"
 license = { text = "Apache-2.0" }
