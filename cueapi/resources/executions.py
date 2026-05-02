@@ -124,6 +124,96 @@ class ExecutionsResource:
         """Get a single execution."""
         return self._client._get(f"/v1/executions/{execution_id}")
 
+    def list_claimable(
+        self,
+        *,
+        task: Optional[str] = None,
+        agent: Optional[str] = None,
+    ) -> dict:
+        """List unclaimed worker-transport executions ready for processing.
+
+        Filters server-side via task / agent query params (NOT client-side).
+        Required for single-purpose workers; without a filter, sibling tasks
+        ahead in the LIMIT 50 window starve your handler.
+
+        Returns:
+            Dict with "executions" list, each item carrying execution_id,
+            cue_id, cue_name, task, scheduled_for, payload, attempt.
+        """
+        params: Dict[str, Any] = {}
+        if task is not None:
+            params["task"] = task
+        if agent is not None:
+            params["agent"] = agent
+        return self._client._get("/v1/executions/claimable", params=params)
+
+    def claim(self, execution_id: str, *, worker_id: str) -> dict:
+        """Atomically claim a specific worker-transport execution.
+
+        Conditional UPDATE WHERE status IN ('pending', 'retry_ready'); returns
+        409 if already claimed or not eligible. Response includes lease_seconds
+        (default 900s = 15 min); send heartbeat well before that to extend.
+
+        Args:
+            execution_id: Execution UUID.
+            worker_id: Stable identifier for this worker. Caller-defined, not
+                session/process-scoped. Same value must be used across
+                claim, heartbeat, and outcome calls so the server can enforce
+                ownership.
+
+        Returns:
+            Dict with claimed (bool), execution_id, lease_seconds.
+        """
+        return self._client._post(
+            f"/v1/executions/{execution_id}/claim",
+            json={"worker_id": worker_id},
+        )
+
+    def claim_next(
+        self,
+        *,
+        worker_id: str,
+        task: Optional[str] = None,
+    ) -> dict:
+        """Claim the next available worker-transport execution.
+
+        Without task, the server picks the oldest pending across any of your
+        worker cues. With task, this method internally fans out (list_claimable
+        filtered, pick oldest, claim by ID) since the server's claim endpoint
+        does not accept a task filter today. Tiny race window between list and
+        claim is bounded by the atomic claim returning 409, in which case the
+        caller retries.
+
+        Args:
+            worker_id: Stable caller-defined identifier (see claim()).
+            task: Optional task filter.
+
+        Returns:
+            Dict with claimed (bool), execution_id, lease_seconds. When
+            task is set and no executions are claimable for that task,
+            returns {"claimed": False, "reason": "no_executions_for_task",
+            "task": <task>}.
+        """
+        if task is not None:
+            listing = self._client._get(
+                "/v1/executions/claimable", params={"task": task}
+            )
+            execs = listing.get("executions") or []
+            if not execs:
+                return {
+                    "claimed": False,
+                    "reason": "no_executions_for_task",
+                    "task": task,
+                }
+            next_id = execs[0].get("execution_id")
+            return self._client._post(
+                f"/v1/executions/{next_id}/claim",
+                json={"worker_id": worker_id},
+            )
+        return self._client._post(
+            "/v1/executions/claim", json={"worker_id": worker_id}
+        )
+
     def heartbeat(self, execution_id: str) -> dict:
         """Send heartbeat to extend claim lease."""
         return self._client._post(f"/v1/executions/{execution_id}/heartbeat", json={})

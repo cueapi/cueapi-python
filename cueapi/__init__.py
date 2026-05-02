@@ -18,7 +18,7 @@ from cueapi.resources.usage import UsageResource
 from cueapi.resources.workers import WorkersResource
 from cueapi.webhook import verify_webhook
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 __all__ = [
     "AgentsResource",
