@@ -12,6 +12,8 @@ from cueapi.exceptions import (
 )
 from cueapi.payload import CuePayload
 from cueapi.resources.executions import ExecutionsResource
+from cueapi.resources.usage import UsageResource
+from cueapi.resources.workers import WorkersResource
 from cueapi.webhook import verify_webhook
 
 __version__ = "0.1.2"
@@ -20,6 +22,8 @@ __all__ = [
     "CueAPI",
     "CuePayload",
     "ExecutionsResource",
+    "UsageResource",
+    "WorkersResource",
     "verify_webhook",
     "CueAPIError",
     "AuthenticationError",
