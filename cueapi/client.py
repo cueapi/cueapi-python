@@ -18,6 +18,7 @@ from cueapi.exceptions import (
 from cueapi.resources.agents import AgentsResource
 from cueapi.resources.cues import CuesResource
 from cueapi.resources.executions import ExecutionsResource
+from cueapi.resources.messages import MessagesResource
 from cueapi.resources.usage import UsageResource
 from cueapi.resources.workers import WorkersResource
 
@@ -75,6 +76,7 @@ class CueAPI:
         self.workers = WorkersResource(self)
         self.usage = UsageResource(self)
         self.agents = AgentsResource(self)
+        self.messages = MessagesResource(self)
 
     def close(self) -> None:
         """Close the underlying HTTP client."""

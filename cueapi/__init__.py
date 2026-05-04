@@ -13,6 +13,7 @@ from cueapi.exceptions import (
 from cueapi.payload import CuePayload
 from cueapi.resources.agents import AgentsResource
 from cueapi.resources.executions import ExecutionsResource
+from cueapi.resources.messages import MessagesResource
 from cueapi.resources.usage import UsageResource
 from cueapi.resources.workers import WorkersResource
 from cueapi.webhook import verify_webhook
@@ -24,6 +25,7 @@ __all__ = [
     "CueAPI",
     "CuePayload",
     "ExecutionsResource",
+    "MessagesResource",
     "UsageResource",
     "WorkersResource",
     "verify_webhook",
