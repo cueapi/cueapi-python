@@ -225,6 +225,7 @@ class CuesResource:
         *,
         payload_override: Optional[Dict[str, Any]] = None,
         merge_strategy: Optional[str] = None,
+        send_at: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Fire an existing cue immediately, optionally overriding its payload.
 
@@ -241,6 +242,14 @@ class CuesResource:
                 payload. "merge" (server default) shallow-merges with override
                 wins on key collisions. "replace" uses override as the final
                 payload, ignoring cue.payload.
+            send_at: Optional ISO 8601 UTC timestamp to schedule this fire for
+                the future (hosted PR #618). When set and in the future, the
+                resulting execution sits in ``pending`` until ``send_at <=
+                now()``, then enters the normal dispatch path. Past timestamps
+                are treated as "fire now" — idempotent and forgiving (no error
+                for a few-ms-late caller). Server's ``FireRequest.send_at`` is
+                ``Optional[datetime]``; passing an ISO string is fine
+                server-side.
 
         Returns:
             The execution dict (id, scheduled_for, status, etc.).
@@ -250,4 +259,6 @@ class CuesResource:
             body["payload_override"] = payload_override
         if merge_strategy is not None:
             body["merge_strategy"] = merge_strategy
+        if send_at is not None:
+            body["send_at"] = send_at
         return self._client._post(f"/v1/cues/{cue_id}/fire", json=body)

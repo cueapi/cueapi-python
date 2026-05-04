@@ -55,3 +55,54 @@ class TestFire:
 
         sent_body = mock_client._post.call_args.kwargs["json"]
         assert "merge_strategy" not in sent_body
+
+    def test_fire_with_send_at(self):
+        # Hosted PR #618: per-fire scheduling. send_at as ISO string lands
+        # in the body unchanged.
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "exec_test",
+            "scheduled_for": "2026-05-04T20:00:00Z",
+        }
+        resource = CuesResource(mock_client)
+
+        resource.fire("cue_abc123", send_at="2026-05-04T20:00:00Z")
+
+        mock_client._post.assert_called_once_with(
+            "/v1/cues/cue_abc123/fire",
+            json={"send_at": "2026-05-04T20:00:00Z"},
+        )
+
+    def test_fire_omits_send_at_when_not_passed(self):
+        # Pin: when send_at is None (default), the body must not include the
+        # key. Sending null adds noise to the request and may interact poorly
+        # with future Pydantic schemas.
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "exec_test"}
+        resource = CuesResource(mock_client)
+
+        resource.fire("cue_abc123")
+
+        sent_body = mock_client._post.call_args.kwargs["json"]
+        assert "send_at" not in sent_body
+
+    def test_fire_combines_send_at_with_payload_override(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "exec_test"}
+        resource = CuesResource(mock_client)
+
+        resource.fire(
+            "cue_abc123",
+            payload_override={"task": "demo"},
+            merge_strategy="replace",
+            send_at="2026-05-04T22:00:00Z",
+        )
+
+        mock_client._post.assert_called_once_with(
+            "/v1/cues/cue_abc123/fire",
+            json={
+                "payload_override": {"task": "demo"},
+                "merge_strategy": "replace",
+                "send_at": "2026-05-04T22:00:00Z",
+            },
+        )
