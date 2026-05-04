@@ -154,7 +154,14 @@ class TestVerification:
             "/v1/executions/exec_123/verification-pending", json={},
         )
 
-    def test_mark_verified(self):
+    def test_mark_verified_default_sends_valid_true(self):
+        # Regression: prior implementation always sent ``json={}`` and
+        # silently dropped both kwargs. The server treated absent body
+        # as ``valid=true``, so the default-arg path produced the right
+        # outcome by accident — but ``valid=False`` and ``reason="..."``
+        # callers got ``verified_success`` instead of their intent.
+        # Pinning that the default-arg path now sends ``{"valid": True}``
+        # explicitly.
         mock_client = MagicMock()
         mock_client._post.return_value = {"outcome_state": "verified_success"}
         resource = ExecutionsResource(mock_client)
@@ -162,5 +169,78 @@ class TestVerification:
         resource.mark_verified("exec_123")
 
         mock_client._post.assert_called_once_with(
-            "/v1/executions/exec_123/verify", json={},
+            "/v1/executions/exec_123/verify", json={"valid": True},
         )
+
+    def test_mark_verified_with_invalid_sends_false(self):
+        # The fix: ``valid=False`` MUST land in the body. Pre-fix this
+        # was silently dropped.
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"outcome_state": "verification_failed"}
+        resource = ExecutionsResource(mock_client)
+
+        resource.mark_verified("exec_123", valid=False)
+
+        mock_client._post.assert_called_once_with(
+            "/v1/executions/exec_123/verify", json={"valid": False},
+        )
+
+    def test_mark_verified_with_reason(self):
+        # The fix: ``reason`` MUST land in the body. Pre-fix this was
+        # silently dropped, so any caller passing a reason saw it
+        # disappear into the ether.
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"outcome_state": "verification_failed"}
+        resource = ExecutionsResource(mock_client)
+
+        resource.mark_verified("exec_123", valid=False, reason="evidence missing")
+
+        mock_client._post.assert_called_once_with(
+            "/v1/executions/exec_123/verify",
+            json={"valid": False, "reason": "evidence missing"},
+        )
+
+    def test_mark_verified_omits_reason_when_none(self):
+        # ``reason=None`` must NOT serialize as ``"reason": null``; it
+        # must be omitted entirely. Pinning the omit-when-default
+        # behavior.
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"outcome_state": "verified_success"}
+        resource = ExecutionsResource(mock_client)
+
+        resource.mark_verified("exec_123", valid=True, reason=None)
+
+        sent_body = mock_client._post.call_args.kwargs["json"]
+        assert "reason" not in sent_body
+
+
+class TestReplay:
+    def test_replay_posts_to_replay_endpoint(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "execution_id": "exec_new",
+            "scheduled_for": "2026-05-04T17:30:00Z",
+            "status": "pending",
+            "triggered_by": "replay",
+            "replayed_from": "exec_old",
+        }
+        resource = ExecutionsResource(mock_client)
+
+        result = resource.replay("exec_old")
+
+        mock_client._post.assert_called_once_with(
+            "/v1/executions/exec_old/replay", json={},
+        )
+        assert result["execution_id"] == "exec_new"
+        assert result["triggered_by"] == "replay"
+
+    def test_replay_returns_server_dict_unchanged(self):
+        # SDK doesn't transform the response — caller gets the raw dict
+        # the server returned. Pin so a future refactor can't silently
+        # start munging fields.
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"execution_id": "exec_x", "extra": "field"}
+        resource = ExecutionsResource(mock_client)
+
+        result = resource.replay("exec_old")
+        assert result == {"execution_id": "exec_x", "extra": "field"}
