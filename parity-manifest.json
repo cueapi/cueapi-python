@@ -1,0 +1,94 @@
+{
+  "manifest_version": 1,
+  "description": "Parity tracking for cueapi-sdk against the hosted CueAPI API. Enumerates which API surfaces this SDK covers and which it doesn't, so drift becomes visible at audit time. Per the 3-layer parity discipline (PR template + this manifest + Backlog rows for each port).",
+  "private_source_repo": "https://github.com/cueapi/cueapi",
+  "private_source_paths": [
+    "app/routers/",
+    "app/schemas/"
+  ],
+  "last_full_audit": "2026-05-04",
+  "sdk_version_at_audit": "0.1.3",
+  "audit_methodology": "Walk every endpoint in private cueapi/app/routers/ and check coverage in cueapi/resources/. For each covered endpoint, walk the corresponding schemas/*.py to verify field-level coverage in cueapi/models/. Drift goes in `missing_endpoints` or `missing_fields` keyed by endpoint.",
+  "audit_cadence": "Monthly full sweep. Per-PR diffs handled via the .github/pull_request_template.md `Parity Impact` section in the private repo.",
+
+  "endpoints_covered": {
+    "POST /v1/auth/register": {"sdk": "client.register (utility, not on a resource)"},
+    "POST /v1/cues": {"sdk": "client.cues.create"},
+    "GET /v1/cues": {"sdk": "client.cues.list"},
+    "GET /v1/cues/{id}": {"sdk": "client.cues.get"},
+    "PATCH /v1/cues/{id}": {"sdk": "client.cues.update"},
+    "DELETE /v1/cues/{id}": {"sdk": "client.cues.delete"},
+    "POST /v1/cues/{id} (pause)": {"sdk": "client.cues.pause"},
+    "POST /v1/cues/{id} (resume)": {"sdk": "client.cues.resume"},
+    "POST /v1/executions/{id}/outcome": {"sdk": "client.executions.report_outcome"},
+    "GET /v1/executions": {"sdk": "client.executions.list"},
+    "GET /v1/executions/{id}": {"sdk": "client.executions.get"},
+    "POST /v1/executions/{id}/heartbeat": {"sdk": "client.executions.heartbeat"},
+    "POST /v1/executions/{id}/verification-pending": {"sdk": "client.executions.mark_verification_pending"},
+    "POST /v1/executions/{id}/verify": {"sdk": "client.executions.mark_verified"}
+  },
+
+  "endpoints_missing": {
+    "POST /v1/cues/{id}/fire": {
+      "blocker": "Real ergonomic gap. Team-comm convention requires payload_override per fire; SDK users currently fall back to raw httpx.",
+      "tracking": "Backlog row: priority=now after the audit ships. Should pair with the PR #590 require_payload_override port since cue-fire is the primary surface for that enforcement."
+    },
+    "POST /v1/executions/{id}/replay": {"blocker": "Used for retry-from-failure flows; not in any current SDK release."},
+    "GET /v1/executions/claimable": {"blocker": "Worker-pull endpoint; some SDK users want to write Python workers directly without using cueapi-worker."},
+    "POST /v1/executions/{id}/claim": {"blocker": "Same as above — worker-pull surface missing."},
+    "POST /v1/worker/heartbeat": {"blocker": "Worker registration endpoint; same justification."},
+    "GET /v1/workers": {"blocker": "List workers + heartbeat status; useful for fleet visibility."},
+    "GET /v1/usage": {"blocker": "Plan, cue count, execution usage, rate limit info. Currently SDK users hit /v1/auth/me only."},
+    "POST /v1/billing/checkout": {"blocker": "Hosted-only — wrap if/when hosted users need programmatic checkout."},
+    "POST /v1/billing/portal": {"blocker": "Hosted-only."},
+    "POST /v1/auth/key/regenerate": {"blocker": "Risky destructive op; intentionally not surfaced. Re-evaluate."},
+    "GET /v1/auth/webhook-secret": {"blocker": "Webhook-secret retrieval — SDK users running their own webhook servers want this."},
+    "POST /v1/auth/webhook-secret/regenerate": {"blocker": "Destructive; re-evaluate."},
+    "Messaging primitive (all of /v1/agents, /v1/messages, /v1/agents/{id}/inbox)": {
+      "blocker": "Phase 12.1.5 messaging primitive is on prod but not yet exposed in the SDK. Significant new surface — agent identity, send_message, inbox poll, idempotency-keyed sends, reply threading.",
+      "tracking": "Major SDK extension. Should land before push delivery (v1.5) goes wide."
+    }
+  },
+
+  "model_drift": {
+    "Cue": {
+      "sdk_class": "cueapi.models.Cue",
+      "covered_fields": [
+        "id", "name", "description", "status", "transport", "schedule",
+        "callback", "payload", "retry", "next_run", "last_run", "run_count",
+        "fired_count", "on_failure", "warning", "created_at", "updated_at"
+      ],
+      "missing_fields": [
+        "delivery", "alerts", "catch_up", "verification", "on_success_fire",
+        "require_payload_override", "required_payload_keys", "stats"
+      ],
+      "missing_response_shape": "CueDetailResponse (cue + executions[] + execution_total/limit/offset)"
+    },
+    "Execution": {
+      "sdk_class": "no dedicated model; SDK returns dicts from executions.get/list",
+      "needs_dedicated_class": true,
+      "missing_fields": [
+        "payload (PR #589, just shipped)",
+        "outcome",
+        "outcome_state",
+        "triggered_by",
+        "evidence_external_id, evidence_result_url, evidence_result_type, evidence_summary, evidence_validation_state, evidence_assertions",
+        "claimed_by_worker, claimed_at, last_heartbeat_at",
+        "chain_parent_id, chain_depth"
+      ]
+    },
+    "Worker": {
+      "sdk_class": "missing entirely",
+      "missing_fields": ["worker_id", "user_id", "handlers", "last_heartbeat", "heartbeat_status (active/stale/dead)"]
+    },
+    "Agent (messaging)": {"sdk_class": "missing entirely (Phase 12.1.5)"},
+    "Message (messaging)": {"sdk_class": "missing entirely (Phase 12.1.5)"}
+  },
+
+  "ported_pr_history": [
+    "PR #589 (expose payload on GET /v1/executions): NOT YET PORTED — Backlog row 'Parity port: PR #589 → cueapi-python SDK' priority=now.",
+    "PR #590 (require_payload_override + required_payload_keys + cue.fire enforcement): NOT YET PORTED — Backlog row 'Parity port: PR #590 → cueapi-python SDK' priority=now."
+  ],
+
+  "notes": "First seeded 2026-05-04 as Layer 2 of parity discipline (PR template + this manifest + Backlog rows). Schema may evolve based on what auditors actually need. The `endpoints_missing` and `model_drift` sections are deliberately verbose — they are the audit checklist for catching up the SDK to the hosted API."
+}
