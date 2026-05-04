@@ -17,6 +17,8 @@ from cueapi.exceptions import (
 )
 from cueapi.resources.cues import CuesResource
 from cueapi.resources.executions import ExecutionsResource
+from cueapi.resources.usage import UsageResource
+from cueapi.resources.workers import WorkersResource
 
 DEFAULT_BASE_URL = "https://api.cueapi.ai"
 DEFAULT_TIMEOUT = 30.0
@@ -69,6 +71,8 @@ class CueAPI:
         # Resources
         self.cues = CuesResource(self)
         self.executions = ExecutionsResource(self)
+        self.workers = WorkersResource(self)
+        self.usage = UsageResource(self)
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
