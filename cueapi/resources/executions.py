@@ -128,6 +128,27 @@ class ExecutionsResource:
         """Send heartbeat to extend claim lease."""
         return self._client._post(f"/v1/executions/{execution_id}/heartbeat", json={})
 
+    def replay(self, execution_id: str) -> dict:
+        """Replay a terminal execution.
+
+        Creates a fresh execution against the same cue with the original
+        execution's ``payload_override`` carried forward. Server-side
+        constraint: only valid for terminal states (``success`` /
+        ``failed`` / ``missed`` / ``outcome_timeout``); 409 if the
+        execution is still in flight.
+
+        Args:
+            execution_id: Execution UUID to replay.
+
+        Returns:
+            Dict with ``execution_id`` (new), ``scheduled_for``,
+            ``status`` (``pending``), ``triggered_by`` (``replay``),
+            ``replayed_from`` (the original execution_id).
+        """
+        return self._client._post(
+            f"/v1/executions/{execution_id}/replay", json={}
+        )
+
     def mark_verification_pending(self, execution_id: str) -> dict:
         """Mark execution outcome as pending verification."""
         return self._client._post(
@@ -141,5 +162,29 @@ class ExecutionsResource:
         valid: bool = True,
         reason: Optional[str] = None,
     ) -> dict:
-        """Mark execution outcome as verified or verification failed."""
-        return self._client._post(f"/v1/executions/{execution_id}/verify", json={})
+        """Mark execution outcome as verified or verification failed.
+
+        Args:
+            execution_id: Execution UUID.
+            valid: ``True`` (default) transitions to ``verified_success``;
+                ``False`` transitions to ``verification_failed``.
+            reason: Optional human-readable reason (max 500 chars).
+                Appended to the execution's ``evidence_summary``. Most
+                useful with ``valid=False`` to record why verification
+                failed.
+
+        Returns:
+            Dict with the new ``outcome_state`` and timestamp fields.
+        """
+        # Bug fix: the prior implementation accepted ``valid`` and
+        # ``reason`` kwargs but always sent ``json={}``. The server
+        # treated absent body as ``valid=true``, so callers passing
+        # ``valid=False`` or ``reason="..."`` got ``verified_success``
+        # regardless of intent — silently dropping the kwargs. Pinned
+        # by the corresponding regression test.
+        body: Dict[str, Any] = {"valid": valid}
+        if reason is not None:
+            body["reason"] = reason
+        return self._client._post(
+            f"/v1/executions/{execution_id}/verify", json=body
+        )
