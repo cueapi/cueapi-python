@@ -15,6 +15,7 @@ from cueapi.exceptions import (
     InvalidScheduleError,
     RateLimitError,
 )
+from cueapi.resources.agents import AgentsResource
 from cueapi.resources.cues import CuesResource
 from cueapi.resources.executions import ExecutionsResource
 from cueapi.resources.usage import UsageResource
@@ -73,6 +74,7 @@ class CueAPI:
         self.executions = ExecutionsResource(self)
         self.workers = WorkersResource(self)
         self.usage = UsageResource(self)
+        self.agents = AgentsResource(self)
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -93,9 +95,19 @@ class CueAPI:
         *,
         json: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
     ) -> Any:
-        """Make an HTTP request and handle errors."""
-        response = self._http.request(method, path, json=json, params=params)
+        """Make an HTTP request and handle errors.
+
+        ``headers`` extends (does not replace) the client's default
+        ``Authorization`` + ``Content-Type`` + ``User-Agent`` headers.
+        Used by per-call header semantics: messaging primitive's
+        ``X-Cueapi-From-Agent`` + ``Idempotency-Key``, and the
+        destructive-operation guard ``X-Confirm-Destructive``.
+        """
+        response = self._http.request(
+            method, path, json=json, params=params, headers=headers
+        )
         return self._handle_response(response)
 
     def _handle_response(self, response: httpx.Response) -> Any:
