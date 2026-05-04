@@ -244,3 +244,143 @@ class TestReplay:
 
         result = resource.replay("exec_old")
         assert result == {"execution_id": "exec_x", "extra": "field"}
+
+
+class TestListClaimable:
+    # Filtering MUST be server-side via query params, not client-side after
+    # fetch. Client-side filter hits the LIMIT 50 starvation bug fixed in the
+    # 2026-04-25 prod incident (see cueapi-core app/routers/executions.py
+    # docstring at line 122-131).
+
+    def test_list_claimable_no_filters_sends_no_params(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"executions": []}
+        resource = ExecutionsResource(mock_client)
+
+        resource.list_claimable()
+
+        mock_client._get.assert_called_once_with(
+            "/v1/executions/claimable", params={},
+        )
+
+    def test_list_claimable_passes_task_as_query_param(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"executions": []}
+        resource = ExecutionsResource(mock_client)
+
+        resource.list_claimable(task="cowork-workspace")
+
+        mock_client._get.assert_called_once_with(
+            "/v1/executions/claimable",
+            params={"task": "cowork-workspace"},
+        )
+
+    def test_list_claimable_passes_agent_as_query_param(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"executions": []}
+        resource = ExecutionsResource(mock_client)
+
+        resource.list_claimable(agent="writer-bot")
+
+        mock_client._get.assert_called_once_with(
+            "/v1/executions/claimable",
+            params={"agent": "writer-bot"},
+        )
+
+    def test_list_claimable_passes_both_task_and_agent(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"executions": []}
+        resource = ExecutionsResource(mock_client)
+
+        resource.list_claimable(task="t", agent="a")
+
+        mock_client._get.assert_called_once_with(
+            "/v1/executions/claimable",
+            params={"task": "t", "agent": "a"},
+        )
+
+
+class TestClaim:
+    def test_claim_posts_to_specific_execution_with_worker_id_in_body(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "claimed": True,
+            "execution_id": "exec_abc123",
+            "lease_seconds": 900,
+        }
+        resource = ExecutionsResource(mock_client)
+
+        result = resource.claim("exec_abc123", worker_id="cowork-workspace")
+
+        mock_client._post.assert_called_once_with(
+            "/v1/executions/exec_abc123/claim",
+            json={"worker_id": "cowork-workspace"},
+        )
+        assert result["claimed"] is True
+
+
+class TestClaimNext:
+    # Two branches: with task and without. Without task is a single POST.
+    # With task is a fan-out (list_claimable filtered, pick first, claim by ID)
+    # because the server's POST /v1/executions/claim does not accept a task
+    # filter today.
+
+    def test_claim_next_without_task_sends_single_post(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "claimed": True,
+            "execution_id": "exec_test",
+            "lease_seconds": 900,
+        }
+        resource = ExecutionsResource(mock_client)
+
+        resource.claim_next(worker_id="cowork-workspace")
+
+        mock_client._post.assert_called_once_with(
+            "/v1/executions/claim",
+            json={"worker_id": "cowork-workspace"},
+        )
+
+    def test_claim_next_with_task_fans_out_to_list_then_claim(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {
+            "executions": [
+                {"execution_id": "exec_first"},
+                {"execution_id": "exec_second"},
+            ],
+        }
+        mock_client._post.return_value = {
+            "claimed": True,
+            "execution_id": "exec_first",
+            "lease_seconds": 900,
+        }
+        resource = ExecutionsResource(mock_client)
+
+        result = resource.claim_next(
+            worker_id="cowork-workspace", task="cowork-workspace"
+        )
+
+        mock_client._get.assert_called_once_with(
+            "/v1/executions/claimable", params={"task": "cowork-workspace"},
+        )
+        mock_client._post.assert_called_once_with(
+            "/v1/executions/exec_first/claim",
+            json={"worker_id": "cowork-workspace"},
+        )
+        assert result["claimed"] is True
+
+    def test_claim_next_with_task_and_empty_list_returns_no_claim(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"executions": []}
+        resource = ExecutionsResource(mock_client)
+
+        result = resource.claim_next(
+            worker_id="cowork-workspace", task="no-such-task"
+        )
+
+        mock_client._post.assert_not_called()
+        assert result == {
+            "claimed": False,
+            "reason": "no_executions_for_task",
+            "task": "no-such-task",
+        }

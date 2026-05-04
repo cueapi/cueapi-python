@@ -218,3 +218,36 @@ class CuesResource:
             The updated Cue object.
         """
         return self.update(cue_id, status="active")
+
+    def fire(
+        self,
+        cue_id: str,
+        *,
+        payload_override: Optional[Dict[str, Any]] = None,
+        merge_strategy: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Fire an existing cue immediately, optionally overriding its payload.
+
+        For ad-hoc one-shot triggers and for using cues as a messaging channel
+        between agents (carry message/instruction/task/reply_cue_id in
+        payload_override).
+
+        Args:
+            cue_id: The cue ID to fire.
+            payload_override: Override the cue's default payload for this fire
+                only. Persisted on the resulting execution row, never on the
+                cue itself.
+            merge_strategy: How payload_override combines with the cue's stored
+                payload. "merge" (server default) shallow-merges with override
+                wins on key collisions. "replace" uses override as the final
+                payload, ignoring cue.payload.
+
+        Returns:
+            The execution dict (id, scheduled_for, status, etc.).
+        """
+        body: Dict[str, Any] = {}
+        if payload_override is not None:
+            body["payload_override"] = payload_override
+        if merge_strategy is not None:
+            body["merge_strategy"] = merge_strategy
+        return self._client._post(f"/v1/cues/{cue_id}/fire", json=body)
