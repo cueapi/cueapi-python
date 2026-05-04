@@ -11,6 +11,7 @@ from cueapi.exceptions import (
     RateLimitError,
 )
 from cueapi.payload import CuePayload
+from cueapi.resources.agents import AgentsResource
 from cueapi.resources.executions import ExecutionsResource
 from cueapi.resources.usage import UsageResource
 from cueapi.resources.workers import WorkersResource
@@ -19,6 +20,7 @@ from cueapi.webhook import verify_webhook
 __version__ = "0.1.2"
 
 __all__ = [
+    "AgentsResource",
     "CueAPI",
     "CuePayload",
     "ExecutionsResource",
