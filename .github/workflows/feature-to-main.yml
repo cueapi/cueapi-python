@@ -53,16 +53,68 @@ jobs:
           pip install -r cueapi-core/requirements.txt
           pip install -e .
 
-      - name: Run tests
+      - name: Apply migrations to test DB
+        working-directory: cueapi-core
         env:
           DATABASE_URL: postgresql+asyncpg://runner@localhost:5432/cueapi_test
           REDIS_URL: redis://localhost:6379
           SESSION_SECRET: test-session-secret-32-chars-minimum!!
           ENV: test
           RESEND_API_KEY: ""
-          CUEAPI_STAGING_URL: https://api-staging-e962.up.railway.app
-          CUEAPI_STAGING_API_KEY: ${{ secrets.ARGUS_STAGING_KEY }}
+        run: python -m alembic upgrade head
+
+      - name: Start cueapi-core API in background
+        working-directory: cueapi-core
+        env:
+          DATABASE_URL: postgresql+asyncpg://runner@localhost:5432/cueapi_test
+          REDIS_URL: redis://localhost:6379
+          SESSION_SECRET: test-session-secret-32-chars-minimum!!
+          ENV: test
+          RESEND_API_KEY: ""
+          ALLOW_REGISTER: "true"
+          BASE_URL: http://localhost:8000
+        run: |
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 \
+            > /tmp/uvicorn.log 2>&1 &
+          echo $! > /tmp/uvicorn.pid
+
+      - name: Wait for API health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/health > /dev/null; then
+              echo "API ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API failed to start within 30s"
+          cat /tmp/uvicorn.log
+          exit 1
+
+      - name: Register test user and capture API key
+        id: register_user
+        run: |
+          EMAIL="ci-sdk-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}@example.com"
+          RESP=$(curl -sf -X POST http://127.0.0.1:8000/v1/auth/register \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"${EMAIL}\"}")
+          KEY=$(printf '%s' "$RESP" | python -c 'import sys,json;print(json.load(sys.stdin)["api_key"])')
+          if [ -z "$KEY" ]; then
+            echo "Registration failed; response: $RESP"
+            exit 1
+          fi
+          echo "::add-mask::$KEY"
+          echo "api_key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        env:
+          CUEAPI_STAGING_URL: http://127.0.0.1:8000
+          CUEAPI_STAGING_API_KEY: ${{ steps.register_user.outputs.api_key }}
         run: pytest tests/ -v --tb=short
+
+      - name: Dump uvicorn log on failure
+        if: failure()
+        run: cat /tmp/uvicorn.log || true
 
   auto-merge:
     needs: test
