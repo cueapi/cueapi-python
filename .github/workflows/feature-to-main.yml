@@ -53,7 +53,7 @@ jobs:
           pip install -r cueapi-core/requirements.txt
           pip install -e .
 
-      - name: Apply migrations to test DB
+      - name: Initialize test DB schema (model-driven, matches cueapi-core/tests/conftest.py)
         working-directory: cueapi-core
         env:
           DATABASE_URL: postgresql+asyncpg://runner@localhost:5432/cueapi_test
@@ -61,7 +61,27 @@ jobs:
           SESSION_SECRET: test-session-secret-32-chars-minimum!!
           ENV: test
           RESEND_API_KEY: ""
-        run: python -m alembic upgrade head
+        run: |
+          python <<'PY'
+          import asyncio
+          from sqlalchemy.ext.asyncio import create_async_engine
+          from app.config import settings
+          from app.database import Base
+          # Import all models so Base.metadata sees them (mirrors tests/conftest.py).
+          from app.models import (  # noqa: F401
+              Alert, Cue, DispatchOutbox, Execution, UsageMonthly, User, Worker, DeviceCode,
+              Agent, Message, UsageMessagesMonthly,
+          )
+
+          async def _init():
+              engine = create_async_engine(settings.DATABASE_URL)
+              async with engine.begin() as conn:
+                  await conn.run_sync(Base.metadata.create_all)
+              await engine.dispose()
+
+          asyncio.run(_init())
+          print("Schema initialized via Base.metadata.create_all")
+          PY
 
       - name: Start cueapi-core API in background
         working-directory: cueapi-core
