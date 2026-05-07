@@ -217,3 +217,56 @@ class TestSent:
             "/v1/agents/agt_x/sent",
             params={"limit": 50, "offset": 0},
         )
+
+
+class TestRoster:
+    """Agent directory roster — cueapi #630 parity."""
+
+    def test_roster_no_etag(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"agents": [], "etag": "abc"}
+        r = AgentsResource(mock_client)
+
+        r.roster()
+
+        # No If-None-Match header when if_none_match is None
+        mock_client._get.assert_called_once_with("/v1/agents/roster")
+
+    def test_roster_with_if_none_match(self):
+        """If-None-Match flows as a header (not a query param)."""
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"agents": [], "etag": "v2"}
+        r = AgentsResource(mock_client)
+
+        r.roster(if_none_match="W/\"abc\"")
+
+        mock_client._get.assert_called_once_with(
+            "/v1/agents/roster",
+            headers={"If-None-Match": 'W/"abc"'},
+        )
+
+
+class TestPresence:
+    """Cheap-poll presence — cueapi #662 parity."""
+
+    def test_presence_by_id(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {
+            "online": True,
+            "derived_status": "active",
+            "bucketed_seen": "now",
+        }
+        r = AgentsResource(mock_client)
+
+        r.presence("agt_abcdef123456")
+
+        mock_client._get.assert_called_once_with("/v1/agents/agt_abcdef123456/presence")
+
+    def test_presence_by_slug_form(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"online": False}
+        r = AgentsResource(mock_client)
+
+        r.presence("foo@me")
+
+        mock_client._get.assert_called_once_with("/v1/agents/foo@me/presence")
