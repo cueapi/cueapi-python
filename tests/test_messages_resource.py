@@ -137,3 +137,64 @@ class TestAck:
         mock_client._post.assert_called_once_with(
             "/v1/messages/msg_x/ack", json={},
         )
+
+
+class TestSendAt:
+    """Per-message scheduling via send_at (cueapi #623 parity port).
+
+    Mock-based following the existing pattern in this file. Asserts on
+    the request body shape — that's the SDK contract; what the server
+    does with it (delay then deliver) is exercised by the server suite.
+    """
+
+    def test_send_with_send_at_iso_string(self):
+        """send_at as ISO 8601 string flows into the request body verbatim."""
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "msg_x", "delivery_state": "queued"}
+        r = MessagesResource(mock_client)
+
+        r.send(
+            from_agent="sender@x",
+            to="recipient@y",
+            body="hi",
+            send_at="2030-01-01T12:00:00Z",
+        )
+
+        mock_client._post.assert_called_once_with(
+            "/v1/messages",
+            json={
+                "to": "recipient@y",
+                "body": "hi",
+                "send_at": "2030-01-01T12:00:00Z",
+            },
+            headers={"X-Cueapi-From-Agent": "sender@x"},
+        )
+
+    def test_send_with_send_at_datetime_auto_isoformats(self):
+        """send_at as datetime auto-serializes via .isoformat()."""
+        from datetime import datetime, timezone
+
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "msg_x", "delivery_state": "queued"}
+        r = MessagesResource(mock_client)
+
+        r.send(
+            from_agent="sender@x",
+            to="recipient@y",
+            body="hi",
+            send_at=datetime(2030, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+
+        call = mock_client._post.call_args
+        assert call.kwargs["json"]["send_at"] == "2030-01-01T12:00:00+00:00"
+
+    def test_send_without_send_at_omits_field(self):
+        """send_at unset → field NOT present in request body."""
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "msg_x", "delivery_state": "queued"}
+        r = MessagesResource(mock_client)
+
+        r.send(from_agent="sender@x", to="recipient@y", body="hi")
+
+        call = mock_client._post.call_args
+        assert "send_at" not in call.kwargs["json"]
