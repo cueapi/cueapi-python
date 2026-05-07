@@ -226,7 +226,7 @@ class CuesResource:
         payload_override: Optional[Dict[str, Any]] = None,
         merge_strategy: Optional[str] = None,
         send_at: Optional[Union[str, datetime]] = None,
-        exit_criteria: Optional[Dict[str, Any]] = None,
+        exit_criteria: Optional[List[str]] = None,
         idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Fire an existing cue, optionally overriding payload + scheduling.
@@ -250,14 +250,22 @@ class CuesResource:
             send_at: Optional ISO 8601 timestamp (or ``datetime``) to
                 delay this fire. If omitted, the execution is scheduled
                 immediately. Per-fire scheduling landed in cueapi #618.
-            exit_criteria: Optional per-fire termination conditions
-                (cueapi #632). Dict shape mirrors the API contract;
-                keys vary by criterion type.
-            idempotency_key: Optional ``Idempotency-Key`` header
-                (cueapi #683). Same key + same body within 24h returns
-                the existing execution with HTTP 200 instead of creating
-                a new fire; same key + different body returns 409
-                ``idempotency_key_conflict``.
+            exit_criteria: Optional list of required-assertion keys for
+                §14 work-verification-light (cueapi #632). When non-null,
+                the receiver MUST report values for every key under
+                ``outcome.assertions``; missing keys mark the execution
+                ``verification_failed``. Empty list (``[]``) explicitly
+                opts out of cue-level required_assertions for this fire.
+                None = use cue-level (existing behavior). Max 20 keys.
+            idempotency_key: Optional opaque caller-supplied dedup key
+                (cueapi #683, ≤256 chars). Same key on the same cue
+                within 24h returns the cached execution without firing
+                again (matched by SHA-256 fingerprint of the canonicalized
+                body). Same key + DIFFERENT body in the window returns
+                409 ``idempotency_key_conflict``. Sent as a body field
+                (NOT the ``Idempotency-Key`` header — server-side cues
+                fire diverges from messaging-primitive convention here;
+                Phase 2 spec puts it in the body).
 
         Returns:
             The execution dict (id, scheduled_for, status, triggered_by,
@@ -269,6 +277,7 @@ class CuesResource:
             ...     "cue_abc123",
             ...     payload_override={"task": "manual-trigger"},
             ...     send_at="2026-05-07T12:00:00Z",
+            ...     exit_criteria=["task_completed", "result_valid"],
             ...     idempotency_key="ci-run-456",
             ... )
         """
@@ -283,12 +292,11 @@ class CuesResource:
             )
         if exit_criteria is not None:
             body["exit_criteria"] = exit_criteria
-
-        headers = {}
+        # idempotency_key is a body field on cues fire (server's
+        # FireRequest schema), unlike messaging-primitive idempotency
+        # which uses the Idempotency-Key header. Server-side
+        # inconsistency that the SDK has to live with.
         if idempotency_key is not None:
-            headers["Idempotency-Key"] = idempotency_key
+            body["idempotency_key"] = idempotency_key
 
-        kwargs: Dict[str, Any] = {"json": body}
-        if headers:
-            kwargs["headers"] = headers
-        return self._client._post(f"/v1/cues/{cue_id}/fire", **kwargs)
+        return self._client._post(f"/v1/cues/{cue_id}/fire", json=body)
