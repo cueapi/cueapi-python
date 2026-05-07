@@ -225,29 +225,70 @@ class CuesResource:
         *,
         payload_override: Optional[Dict[str, Any]] = None,
         merge_strategy: Optional[str] = None,
+        send_at: Optional[Union[str, datetime]] = None,
+        exit_criteria: Optional[Dict[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Fire an existing cue immediately, optionally overriding its payload.
+        """Fire an existing cue, optionally overriding payload + scheduling.
 
-        For ad-hoc one-shot triggers and for using cues as a messaging channel
-        between agents (carry message/instruction/task/reply_cue_id in
-        payload_override).
+        ``POST /v1/cues/{cue_id}/fire``. Returns the created execution
+        dict (not a Cue) — fire creates an execution row, not a new cue.
+
+        Useful for ad-hoc one-shot triggers and for using cues as a
+        messaging channel between agents (carry message/instruction/task/
+        reply_cue_id in ``payload_override``).
 
         Args:
             cue_id: The cue ID to fire.
-            payload_override: Override the cue's default payload for this fire
-                only. Persisted on the resulting execution row, never on the
-                cue itself.
-            merge_strategy: How payload_override combines with the cue's stored
-                payload. "merge" (server default) shallow-merges with override
-                wins on key collisions. "replace" uses override as the final
-                payload, ignoring cue.payload.
+            payload_override: Override the cue's default payload for this
+                fire only. Persisted on the resulting execution row, never
+                on the cue itself.
+            merge_strategy: How ``payload_override`` combines with the
+                cue's stored payload. ``"merge"`` (server default) shallow-
+                merges with override wins on key collisions. ``"replace"``
+                uses override as the final payload, ignoring ``cue.payload``.
+            send_at: Optional ISO 8601 timestamp (or ``datetime``) to
+                delay this fire. If omitted, the execution is scheduled
+                immediately. Per-fire scheduling landed in cueapi #618.
+            exit_criteria: Optional per-fire termination conditions
+                (cueapi #632). Dict shape mirrors the API contract;
+                keys vary by criterion type.
+            idempotency_key: Optional ``Idempotency-Key`` header
+                (cueapi #683). Same key + same body within 24h returns
+                the existing execution with HTTP 200 instead of creating
+                a new fire; same key + different body returns 409
+                ``idempotency_key_conflict``.
 
         Returns:
-            The execution dict (id, scheduled_for, status, etc.).
+            The execution dict (id, scheduled_for, status, triggered_by,
+            etc.).
+
+        Examples:
+            >>> exec = client.cues.fire("cue_abc123")
+            >>> exec = client.cues.fire(
+            ...     "cue_abc123",
+            ...     payload_override={"task": "manual-trigger"},
+            ...     send_at="2026-05-07T12:00:00Z",
+            ...     idempotency_key="ci-run-456",
+            ... )
         """
         body: Dict[str, Any] = {}
         if payload_override is not None:
             body["payload_override"] = payload_override
         if merge_strategy is not None:
             body["merge_strategy"] = merge_strategy
-        return self._client._post(f"/v1/cues/{cue_id}/fire", json=body)
+        if send_at is not None:
+            body["send_at"] = (
+                send_at.isoformat() if isinstance(send_at, datetime) else send_at
+            )
+        if exit_criteria is not None:
+            body["exit_criteria"] = exit_criteria
+
+        headers = {}
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+
+        kwargs: Dict[str, Any] = {"json": body}
+        if headers:
+            kwargs["headers"] = headers
+        return self._client._post(f"/v1/cues/{cue_id}/fire", **kwargs)
