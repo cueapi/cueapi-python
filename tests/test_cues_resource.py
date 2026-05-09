@@ -55,3 +55,100 @@ class TestFire:
 
         sent_body = mock_client._post.call_args.kwargs["json"]
         assert "merge_strategy" not in sent_body
+
+
+class TestBulkDelete:
+    def test_bulk_delete_happy_path(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "deleted": ["cue_abc", "cue_def"],
+            "skipped": [],
+        }
+        resource = CuesResource(mock_client)
+
+        result = resource.bulk_delete(["cue_abc", "cue_def"])
+
+        mock_client._post.assert_called_once_with(
+            "/v1/cues/bulk-delete",
+            json={"ids": ["cue_abc", "cue_def"]},
+            headers={"X-Confirm-Destructive": "true"},
+        )
+        assert result == {"deleted": ["cue_abc", "cue_def"], "skipped": []}
+
+    def test_bulk_delete_with_skipped(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "deleted": ["cue_abc"],
+            "skipped": ["cue_xyz"],
+        }
+        resource = CuesResource(mock_client)
+
+        result = resource.bulk_delete(["cue_abc", "cue_xyz"])
+
+        assert result["deleted"] == ["cue_abc"]
+        assert result["skipped"] == ["cue_xyz"]
+
+    def test_bulk_delete_sends_confirm_destructive_header(self):
+        # Pin the X-Confirm-Destructive header — server requires it for
+        # any bulk-destructive endpoint. If a future refactor drops this
+        # header, the server returns 400 confirmation_required and the
+        # SDK call silently fails.
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"deleted": ["cue_a"], "skipped": []}
+        resource = CuesResource(mock_client)
+
+        resource.bulk_delete(["cue_a"])
+
+        kwargs = mock_client._post.call_args.kwargs
+        assert kwargs["headers"]["X-Confirm-Destructive"] == "true"
+
+    def test_bulk_delete_empty_ids_raises(self):
+        mock_client = MagicMock()
+        resource = CuesResource(mock_client)
+
+        import pytest
+
+        with pytest.raises(ValueError, match="at least one cue ID"):
+            resource.bulk_delete([])
+
+        # Server NOT called — fail-fast at SDK layer.
+        mock_client._post.assert_not_called()
+
+    def test_bulk_delete_over_100_ids_raises(self):
+        mock_client = MagicMock()
+        resource = CuesResource(mock_client)
+
+        import pytest
+
+        ids = [f"cue_{i}" for i in range(101)]
+        with pytest.raises(ValueError, match="Max 100"):
+            resource.bulk_delete(ids)
+
+        mock_client._post.assert_not_called()
+
+    def test_bulk_delete_exactly_100_ids_ok(self):
+        # Boundary — 100 IDs is allowed (server cap is inclusive).
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "deleted": [f"cue_{i}" for i in range(100)],
+            "skipped": [],
+        }
+        resource = CuesResource(mock_client)
+
+        ids = [f"cue_{i}" for i in range(100)]
+        result = resource.bulk_delete(ids)
+
+        assert len(result["deleted"]) == 100
+
+    def test_bulk_delete_accepts_iterable_not_just_list(self):
+        # The method coerces the input to a list before sending. Verifies
+        # tuple / generator inputs work without explicit conversion at
+        # the call site.
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"deleted": ["cue_a"], "skipped": []}
+        resource = CuesResource(mock_client)
+
+        resource.bulk_delete(("cue_a",))
+
+        sent_body = mock_client._post.call_args.kwargs["json"]
+        assert sent_body == {"ids": ["cue_a"]}

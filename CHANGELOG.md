@@ -2,6 +2,12 @@
 
 All notable changes to cueapi-sdk will be documented here.
 
+## [Unreleased]
+
+### Added
+
+- `client.cues.bulk_delete(ids)` — delete up to 100 cues in a single call. Returns `{"deleted": [...], "skipped": [...]}`. Per-ID atomic, not batch atomic. Sends `X-Confirm-Destructive: true` header automatically. Wraps `POST /v1/cues/bulk-delete` (cueapi #650). Parity port of cueapi-cli #46. Raises `ValueError` client-side on empty list or > 100 IDs.
+
 ## [0.2.0] - 2026-05-01
 
 ### Added
