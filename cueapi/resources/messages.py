@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 if TYPE_CHECKING:
     from cueapi.client import CueAPI
@@ -33,6 +34,7 @@ class MessagesResource:
         reply_to_agent: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         idempotency_key: Optional[str] = None,
+        send_at: Optional[Union[str, datetime]] = None,
     ) -> dict:
         """Send a message.
 
@@ -69,6 +71,11 @@ class MessagesResource:
             metadata: Optional JSON metadata blob.
             idempotency_key: Optional ``Idempotency-Key`` header
                 (≤255 chars).
+            send_at: Optional ISO 8601 timestamp (or ``datetime``) to
+                delay this message's delivery. If omitted, the message
+                is delivered immediately. Per-message scheduling landed
+                in cueapi #623 — server stores ``send_at`` on the
+                message row and the worker picks it up when due.
 
         Returns:
             Dict matching the server's ``MessageResponse`` shape.
@@ -95,6 +102,10 @@ class MessagesResource:
             payload["reply_to_agent"] = reply_to_agent
         if metadata is not None:
             payload["metadata"] = metadata
+        if send_at is not None:
+            payload["send_at"] = (
+                send_at.isoformat() if isinstance(send_at, datetime) else send_at
+            )
 
         headers: Dict[str, str] = {"X-Cueapi-From-Agent": from_agent}
         if idempotency_key is not None:
