@@ -6,8 +6,8 @@
     "app/routers/",
     "app/schemas/"
   ],
-  "last_full_audit": "2026-05-04",
-  "sdk_version_at_audit": "0.1.3",
+  "last_full_audit": "2026-05-07",
+  "sdk_version_at_audit": "0.2.x",
   "audit_methodology": "Walk every endpoint in private cueapi/app/routers/ and check coverage in cueapi/resources/. For each covered endpoint, walk the corresponding schemas/*.py to verify field-level coverage in cueapi/models/. Drift goes in `missing_endpoints` or `missing_fields` keyed by endpoint.",
   "audit_cadence": "Monthly full sweep. Per-PR diffs handled via the .github/pull_request_template.md `Parity Impact` section in the private repo.",
 
@@ -20,34 +20,53 @@
     "DELETE /v1/cues/{id}": {"sdk": "client.cues.delete"},
     "POST /v1/cues/{id} (pause)": {"sdk": "client.cues.pause"},
     "POST /v1/cues/{id} (resume)": {"sdk": "client.cues.resume"},
+    "POST /v1/cues/{id}/fire": {"sdk": "client.cues.fire (PR #23; in-flight kwargs send_at + exit_criteria + idempotency_key in #33)"},
     "POST /v1/executions/{id}/outcome": {"sdk": "client.executions.report_outcome"},
     "GET /v1/executions": {"sdk": "client.executions.list"},
     "GET /v1/executions/{id}": {"sdk": "client.executions.get"},
     "POST /v1/executions/{id}/heartbeat": {"sdk": "client.executions.heartbeat"},
     "POST /v1/executions/{id}/verification-pending": {"sdk": "client.executions.mark_verification_pending"},
-    "POST /v1/executions/{id}/verify": {"sdk": "client.executions.mark_verified"}
+    "POST /v1/executions/{id}/verify": {"sdk": "client.executions.mark_verified"},
+    "POST /v1/executions/{id}/replay": {"sdk": "client.executions.replay (PR #25)"},
+    "GET /v1/executions/claimable": {"sdk": "client.executions.list_claimable (PR #23)"},
+    "POST /v1/executions/{id}/claim": {"sdk": "client.executions.claim (PR #23)"},
+    "POST /v1/executions/claim": {"sdk": "client.executions.claim_next (PR #23)"},
+    "GET /v1/workers": {"sdk": "client.workers.list (PR #26)"},
+    "DELETE /v1/workers/{id}": {"sdk": "client.workers.delete (PR #26)"},
+    "GET /v1/usage": {"sdk": "client.usage.get (PR #26)"},
+    "POST /v1/agents": {"sdk": "client.agents.create (PR #27)"},
+    "GET /v1/agents": {"sdk": "client.agents.list (PR #27)"},
+    "GET /v1/agents/{ref}": {"sdk": "client.agents.get (PR #27)"},
+    "PATCH /v1/agents/{ref}": {"sdk": "client.agents.update (PR #27)"},
+    "DELETE /v1/agents/{ref}": {"sdk": "client.agents.delete (PR #27)"},
+    "GET /v1/agents/{ref}/webhook-secret": {"sdk": "client.agents.get_webhook_secret (PR #27)"},
+    "GET /v1/agents/{ref}/inbox": {"sdk": "client.agents.inbox (PR #27)"},
+    "GET /v1/agents/{ref}/sent": {"sdk": "client.agents.sent (PR #27)"},
+    "GET /v1/agents/roster": {"sdk": "client.agents.roster (in-flight PR #35; cueapi #630 parity)"},
+    "GET /v1/agents/{ref}/presence": {"sdk": "client.agents.presence (in-flight PR #35; cueapi #662 parity)"},
+    "POST /v1/messages": {"sdk": "client.messages.send (PR #28; in-flight send_at kwarg in #34)"},
+    "GET /v1/messages/{id}": {"sdk": "client.messages.get (PR #28)"},
+    "POST /v1/messages/{id}/read": {"sdk": "client.messages.mark_read (PR #28)"},
+    "POST /v1/messages/{id}/ack": {"sdk": "client.messages.ack (PR #28)"}
   },
 
   "endpoints_missing": {
-    "POST /v1/cues/{id}/fire": {
-      "blocker": "Real ergonomic gap. Team-comm convention requires payload_override per fire; SDK users currently fall back to raw httpx.",
-      "tracking": "Backlog row: priority=now after the audit ships. Should pair with the PR #590 require_payload_override port since cue-fire is the primary surface for that enforcement."
-    },
-    "POST /v1/executions/{id}/replay": {"blocker": "Used for retry-from-failure flows; not in any current SDK release."},
-    "GET /v1/executions/claimable": {"blocker": "Worker-pull endpoint; some SDK users want to write Python workers directly without using cueapi-worker."},
-    "POST /v1/executions/{id}/claim": {"blocker": "Same as above — worker-pull surface missing."},
-    "POST /v1/worker/heartbeat": {"blocker": "Worker registration endpoint; same justification."},
-    "GET /v1/workers": {"blocker": "List workers + heartbeat status; useful for fleet visibility."},
-    "GET /v1/usage": {"blocker": "Plan, cue count, execution usage, rate limit info. Currently SDK users hit /v1/auth/me only."},
+    "POST /v1/worker/heartbeat": {"blocker": "Worker registration endpoint; users typically run cueapi-worker package which handles this internally."},
     "POST /v1/billing/checkout": {"blocker": "Hosted-only — wrap if/when hosted users need programmatic checkout."},
     "POST /v1/billing/portal": {"blocker": "Hosted-only."},
-    "POST /v1/auth/key/regenerate": {"blocker": "Risky destructive op; intentionally not surfaced. Re-evaluate."},
-    "GET /v1/auth/webhook-secret": {"blocker": "Webhook-secret retrieval — SDK users running their own webhook servers want this."},
-    "POST /v1/auth/webhook-secret/regenerate": {"blocker": "Destructive; re-evaluate."},
-    "Messaging primitive (all of /v1/agents, /v1/messages, /v1/agents/{id}/inbox)": {
-      "blocker": "Phase 12.1.5 messaging primitive is on prod but not yet exposed in the SDK. Significant new surface — agent identity, send_message, inbox poll, idempotency-keyed sends, reply threading.",
-      "tracking": "Major SDK extension. Should land before push delivery (v1.5) goes wide."
-    }
+    "POST /v1/auth/key/regenerate": {"blocker": "Risky destructive op; intentionally not surfaced."},
+    "GET /v1/auth/webhook-secret": {"blocker": "Webhook-secret retrieval — could surface if SDK users want to verify signatures programmatically. Re-evaluate."},
+    "POST /v1/auth/webhook-secret/regenerate": {"blocker": "Destructive; intentionally not surfaced."},
+    "POST /v1/agents/{ref}/webhook-secret/regenerate": {"blocker": "Destructive; needs --confirm-destructive pattern. Tracked on Backlog (Drift-audit deferred 2026-05-07)."},
+    "DELETE /v1/messages bulk (cueapi #650)": {"blocker": "Server-side shipped; not yet in cueapi-cli. SDK can port directly. Tracked on Backlog (Drift-audit deferred 2026-05-07)."},
+    "POST /v1/executions/{id}/live-claim (cueapi #664)": {"blocker": "P0 Live-claim attestation endpoint. Handler-runtime concern, not SDK control-plane. Re-evaluate if SDK users build live-attached handlers in Python."}
+  },
+
+  "in_flight_ports_2026_05_07": {
+    "PR #33 (open)": "client.cues.fire(send_at, exit_criteria, idempotency_key) — covers cueapi #618 + #632 + #683",
+    "PR #34 (open)": "client.messages.send(send_at) — covers cueapi #623",
+    "PR #35 (open)": "client.agents.roster() + client.agents.presence() — covers cueapi #630 + #662",
+    "PR #30 (open, lane-flagged with cueapi-main)": "client.cues.fire(send_at) — narrower scope of #33"
   },
 
   "model_drift": {
