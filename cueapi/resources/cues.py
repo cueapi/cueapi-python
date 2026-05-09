@@ -197,6 +197,51 @@ class CuesResource:
         """
         self._client._delete(f"/v1/cues/{cue_id}")
 
+    def bulk_delete(self, ids: List[str]) -> Dict[str, List[str]]:
+        """Delete multiple cues in a single call (max 100 per call).
+
+        Per-ID atomic, NOT batch atomic — each ID is independently checked
+        for caller ownership. IDs that don't exist OR aren't owned by the
+        caller land in the ``skipped`` array (silent skip on miss; no
+        info leak about other tenants' cues). Cascade FK handles
+        executions + dispatch_outbox cleanup.
+
+        Sends the ``X-Confirm-Destructive: true`` header automatically;
+        the substrate requires it for any bulk-destructive endpoint.
+
+        Args:
+            ids: Cue IDs to delete. Length 1-100. Server enforces the cap;
+                this method also validates client-side to fail fast.
+
+        Returns:
+            A dict shaped::
+
+                {
+                    "deleted": ["cue_abc", "cue_def"],   # IDs whose rows are gone
+                    "skipped": ["cue_xyz"]               # IDs that didn't exist or weren't owned
+                }
+
+            Order within each group preserves the request's ``ids`` array.
+
+        Raises:
+            ValueError: If ``ids`` is empty or has more than 100 entries.
+
+        Example:
+            >>> client.cues.bulk_delete(["cue_abc", "cue_def", "cue_xyz"])
+            {"deleted": ["cue_abc", "cue_def"], "skipped": ["cue_xyz"]}
+        """
+        if not ids:
+            raise ValueError("ids must contain at least one cue ID.")
+        if len(ids) > 100:
+            raise ValueError(
+                f"Max 100 IDs per call; got {len(ids)}. Split into batches."
+            )
+        return self._client._post(
+            "/v1/cues/bulk-delete",
+            json={"ids": list(ids)},
+            headers={"X-Confirm-Destructive": "true"},
+        )
+
     def pause(self, cue_id: str) -> Cue:
         """Pause a cue. Equivalent to update(cue_id, status="paused").
 
