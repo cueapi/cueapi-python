@@ -270,29 +270,78 @@ class CuesResource:
         *,
         payload_override: Optional[Dict[str, Any]] = None,
         merge_strategy: Optional[str] = None,
+        send_at: Optional[Union[str, datetime]] = None,
+        exit_criteria: Optional[List[str]] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Fire an existing cue immediately, optionally overriding its payload.
+        """Fire an existing cue, optionally overriding payload + scheduling.
 
-        For ad-hoc one-shot triggers and for using cues as a messaging channel
-        between agents (carry message/instruction/task/reply_cue_id in
-        payload_override).
+        ``POST /v1/cues/{cue_id}/fire``. Returns the created execution
+        dict (not a Cue) — fire creates an execution row, not a new cue.
+
+        Useful for ad-hoc one-shot triggers and for using cues as a
+        messaging channel between agents (carry message/instruction/task/
+        reply_cue_id in ``payload_override``).
 
         Args:
             cue_id: The cue ID to fire.
-            payload_override: Override the cue's default payload for this fire
-                only. Persisted on the resulting execution row, never on the
-                cue itself.
-            merge_strategy: How payload_override combines with the cue's stored
-                payload. "merge" (server default) shallow-merges with override
-                wins on key collisions. "replace" uses override as the final
-                payload, ignoring cue.payload.
+            payload_override: Override the cue's default payload for this
+                fire only. Persisted on the resulting execution row, never
+                on the cue itself.
+            merge_strategy: How ``payload_override`` combines with the
+                cue's stored payload. ``"merge"`` (server default) shallow-
+                merges with override wins on key collisions. ``"replace"``
+                uses override as the final payload, ignoring ``cue.payload``.
+            send_at: Optional ISO 8601 timestamp (or ``datetime``) to
+                delay this fire. If omitted, the execution is scheduled
+                immediately. Per-fire scheduling landed in cueapi #618.
+            exit_criteria: Optional list of required-assertion keys for
+                §14 work-verification-light (cueapi #632). When non-null,
+                the receiver MUST report values for every key under
+                ``outcome.assertions``; missing keys mark the execution
+                ``verification_failed``. Empty list (``[]``) explicitly
+                opts out of cue-level required_assertions for this fire.
+                None = use cue-level (existing behavior). Max 20 keys.
+            idempotency_key: Optional opaque caller-supplied dedup key
+                (cueapi #683, ≤256 chars). Same key on the same cue
+                within 24h returns the cached execution without firing
+                again (matched by SHA-256 fingerprint of the canonicalized
+                body). Same key + DIFFERENT body in the window returns
+                409 ``idempotency_key_conflict``. Sent as a body field
+                (NOT the ``Idempotency-Key`` header — server-side cues
+                fire diverges from messaging-primitive convention here;
+                Phase 2 spec puts it in the body).
 
         Returns:
-            The execution dict (id, scheduled_for, status, etc.).
+            The execution dict (id, scheduled_for, status, triggered_by,
+            etc.).
+
+        Examples:
+            >>> exec = client.cues.fire("cue_abc123")
+            >>> exec = client.cues.fire(
+            ...     "cue_abc123",
+            ...     payload_override={"task": "manual-trigger"},
+            ...     send_at="2026-05-07T12:00:00Z",
+            ...     exit_criteria=["task_completed", "result_valid"],
+            ...     idempotency_key="ci-run-456",
+            ... )
         """
         body: Dict[str, Any] = {}
         if payload_override is not None:
             body["payload_override"] = payload_override
         if merge_strategy is not None:
             body["merge_strategy"] = merge_strategy
+        if send_at is not None:
+            body["send_at"] = (
+                send_at.isoformat() if isinstance(send_at, datetime) else send_at
+            )
+        if exit_criteria is not None:
+            body["exit_criteria"] = exit_criteria
+        # idempotency_key is a body field on cues fire (server's
+        # FireRequest schema), unlike messaging-primitive idempotency
+        # which uses the Idempotency-Key header. Server-side
+        # inconsistency that the SDK has to live with.
+        if idempotency_key is not None:
+            body["idempotency_key"] = idempotency_key
+
         return self._client._post(f"/v1/cues/{cue_id}/fire", json=body)
