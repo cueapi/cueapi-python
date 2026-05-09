@@ -190,3 +190,53 @@ class AgentsResource:
         """List messages sent by this agent."""
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         return self._client._get(f"/v1/agents/{ref}/sent", params=params)
+
+    def roster(
+        self,
+        *,
+        if_none_match: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """List the agent directory (Surface 6, cueapi #630).
+
+        Returns the user's agent directory — every agent owned by the
+        calling key with a presence block (online state, derived status,
+        bucketed last-seen, default-live cue, labeled live sessions).
+        Used by Directory v0/v1/v2 UIs and by senders that want to
+        choose recipients based on presence.
+
+        Args:
+            if_none_match: Optional ETag from a prior call. Server
+                returns ``304 Not Modified`` (raised as
+                ``CueAPIError`` with status 304) if the directory
+                hasn't changed. Use to cheap-poll without re-fetching
+                payloads.
+
+        Returns:
+            Dict with ``agents`` list (each carrying presence block) and
+            ``etag`` for the next call.
+        """
+        headers: Dict[str, str] = {}
+        if if_none_match is not None:
+            headers["If-None-Match"] = if_none_match
+        kwargs: Dict[str, Any] = {}
+        if headers:
+            kwargs["headers"] = headers
+        return self._client._get("/v1/agents/roster", **kwargs)
+
+    def presence(self, ref: str) -> Dict[str, Any]:
+        """Cheap-poll a single agent's presence block (cueapi #662).
+
+        Lighter than ``get(ref)`` — returns just the presence-relevant
+        fields (online, derived_status, bucketed_seen, default_live,
+        labeled_sessions, etag) without the full agent record.
+        Designed for UIs that need to refresh a single tile every few
+        seconds without re-fetching the full directory or agent record.
+
+        Args:
+            ref: Agent opaque ID (``agt_<12 alnum>``) or slug-form
+                (``slug@user``).
+
+        Returns:
+            Presence dict.
+        """
+        return self._client._get(f"/v1/agents/{ref}/presence")
