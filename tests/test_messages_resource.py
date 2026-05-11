@@ -20,10 +20,14 @@ class TestSend:
 
         r.send(from_agent="sender@x", to="recipient@y", body="hi")
 
+        # Phase 2 of body-verify defense in depth (Mike directive 2026-05-11):
+        # auto_verify=True is the new default → X-CueAPI-Verify-Echo header
+        # always added. Substrate echoes back received body when Layer 1
+        # deployed; SDK diffs + raises BodyVerifyMismatchError on drift.
         mock_client._post.assert_called_once_with(
             "/v1/messages",
             json={"to": "recipient@y", "body": "hi"},
-            headers={"X-Cueapi-From-Agent": "sender@x"},
+            headers={"X-Cueapi-From-Agent": "sender@x", "X-CueAPI-Verify-Echo": "true"},
         )
 
     def test_with_all_optionals(self):
@@ -59,6 +63,7 @@ class TestSend:
         assert call.kwargs["headers"] == {
             "X-Cueapi-From-Agent": "sender@x",
             "Idempotency-Key": "idemp-key-1",
+            "X-CueAPI-Verify-Echo": "true",
         }
 
     def test_omits_expects_reply_when_default(self):
@@ -88,9 +93,10 @@ class TestSend:
         mock_client._post.assert_not_called()
 
     def test_omits_idempotency_key_header_when_unset(self):
-        # Headers should ONLY contain X-Cueapi-From-Agent when no
-        # idempotency_key is passed. Pin so a refactor can't silently
-        # start adding `Idempotency-Key: None` (httpx would coerce).
+        # Headers should ONLY contain X-Cueapi-From-Agent (+ default
+        # auto-verify header) when no idempotency_key is passed. Pin so
+        # a refactor can't silently start adding `Idempotency-Key: None`
+        # (httpx would coerce).
         mock_client = MagicMock()
         mock_client._post.return_value = {"id": "msg_x"}
         r = MessagesResource(mock_client)
@@ -98,7 +104,7 @@ class TestSend:
         r.send(from_agent="x", to="y", body="hi")
 
         headers = mock_client._post.call_args.kwargs["headers"]
-        assert headers == {"X-Cueapi-From-Agent": "x"}
+        assert headers == {"X-Cueapi-From-Agent": "x", "X-CueAPI-Verify-Echo": "true"}
         assert "Idempotency-Key" not in headers
 
 
@@ -167,7 +173,7 @@ class TestSendAt:
                 "body": "hi",
                 "send_at": "2030-01-01T12:00:00Z",
             },
-            headers={"X-Cueapi-From-Agent": "sender@x"},
+            headers={"X-Cueapi-From-Agent": "sender@x", "X-CueAPI-Verify-Echo": "true"},
         )
 
     def test_send_with_send_at_datetime_auto_isoformats(self):
@@ -198,3 +204,126 @@ class TestSendAt:
 
         call = mock_client._post.call_args
         assert "send_at" not in call.kwargs["json"]
+
+
+class TestAutoVerify:
+    """Phase 2 of body-verify defense in depth (Mike directive 2026-05-11).
+
+    auto_verify=True (default) adds X-CueAPI-Verify-Echo: true header.
+    Substrate echoes back received body in 201 response under
+    body_received field; SDK diffs sent vs received + raises
+    BodyVerifyMismatchError on drift.
+    """
+
+    def test_default_adds_verify_echo_header(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "msg_x", "delivery_state": "queued"}
+        r = MessagesResource(mock_client)
+
+        r.send(from_agent="x", to="y", body="hi")
+
+        headers = mock_client._post.call_args.kwargs["headers"]
+        assert headers.get("X-CueAPI-Verify-Echo") == "true"
+
+    def test_opt_out_omits_header(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "msg_x", "delivery_state": "queued"}
+        r = MessagesResource(mock_client)
+
+        r.send(from_agent="x", to="y", body="hi", auto_verify=False)
+
+        headers = mock_client._post.call_args.kwargs["headers"]
+        assert "X-CueAPI-Verify-Echo" not in headers
+
+    def test_byte_identical_response_returns_normally(self):
+        """When server echoes back the same body, send() returns response."""
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "msg_x",
+            "delivery_state": "queued",
+            "body_received": "hi",
+        }
+        r = MessagesResource(mock_client)
+
+        result = r.send(from_agent="x", to="y", body="hi")
+
+        assert result["id"] == "msg_x"
+
+    def test_raises_on_body_mismatch(self):
+        """When server echo differs from sent body, raises BodyVerifyMismatchError."""
+        from cueapi.exceptions import BodyVerifyMismatchError
+
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "msg_mutated",
+            "delivery_state": "queued",
+            "body_received": "body with INJECT (caller's shell command-substituted)",
+        }
+        r = MessagesResource(mock_client)
+
+        with pytest.raises(BodyVerifyMismatchError) as exc:
+            r.send(
+                from_agent="x", to="y",
+                body="body with $(echo INJECT) (intended literal)",
+            )
+
+        assert exc.value.message_id == "msg_mutated"
+        assert "$(echo INJECT)" in exc.value.sent_body
+        assert "INJECT (caller" in exc.value.received_body
+        assert exc.value.first_divergence_byte >= 0
+
+    def test_no_op_when_substrate_omits_echo_field(self):
+        """Backward-compat: pre-Layer-1 substrate doesn't include
+        body_received field → SDK doesn't raise; returns normally."""
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "msg_x", "delivery_state": "queued"}
+        r = MessagesResource(mock_client)
+
+        result = r.send(from_agent="x", to="y", body="hi")
+
+        assert result["id"] == "msg_x"
+
+    def test_opt_out_skips_verify_even_if_substrate_echoes(self):
+        """auto_verify=False: even if substrate sends body_received, don't check."""
+        mock_client = MagicMock()
+        # Mismatched echo but opt-out → no exception
+        mock_client._post.return_value = {
+            "id": "msg_x", "body_received": "DIFFERENT BODY",
+        }
+        r = MessagesResource(mock_client)
+
+        result = r.send(from_agent="x", to="y", body="hi", auto_verify=False)
+
+        assert result["id"] == "msg_x"
+
+
+class TestFirstDivergenceByte:
+    """Pure helper for diagnostic byte-position-of-first-difference."""
+
+    def test_equal_strings_return_minus_one(self):
+        from cueapi.exceptions import first_divergence_byte
+        assert first_divergence_byte("abc", "abc") == -1
+
+    def test_prefix_returns_minus_one(self):
+        from cueapi.exceptions import first_divergence_byte
+        assert first_divergence_byte("abc", "abcd") == -1  # one is prefix of other
+
+    def test_first_char_diff(self):
+        from cueapi.exceptions import first_divergence_byte
+        assert first_divergence_byte("Xbc", "abc") == 0
+
+    def test_middle_diff(self):
+        from cueapi.exceptions import first_divergence_byte
+        assert first_divergence_byte("abXd", "abcd") == 2
+
+    def test_metachar_substitution_scenario(self):
+        """Realistic case: caller's shell substituted $(echo X) → 'X'.
+
+        Sent:     'pre $(echo INJ) post'  (caller intended literal)
+        Received: 'pre INJ post'           (shell already substituted)
+        First divergence at byte 4 (start of '$' in sent vs 'I' in received).
+        """
+        from cueapi.exceptions import first_divergence_byte
+        sent = "pre $(echo INJ) post"
+        received = "pre INJ post"
+        assert first_divergence_byte(sent, received) == 4

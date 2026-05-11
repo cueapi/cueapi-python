@@ -5,8 +5,18 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
+from cueapi.exceptions import BodyVerifyMismatchError, first_divergence_byte
+
 if TYPE_CHECKING:
     from cueapi.client import CueAPI
+
+# Response field where Layer 1 substrate echoes back the body it received
+# (Phase 2 of body-verify defense in depth; Mike directive 2026-05-11).
+# Substrate-side ships this field in the 201 response when the request
+# included ``X-CueAPI-Verify-Echo: true`` header. Field name locked
+# during joint design between cueapi-primary (substrate) + CMA (SDK);
+# update if the design Dock spec finalizes a different name.
+_VERIFY_ECHO_FIELD = "body_received"
 
 
 class MessagesResource:
@@ -35,6 +45,7 @@ class MessagesResource:
         metadata: Optional[Dict[str, Any]] = None,
         idempotency_key: Optional[str] = None,
         send_at: Optional[Union[str, datetime]] = None,
+        auto_verify: bool = True,
     ) -> dict:
         """Send a message.
 
@@ -110,8 +121,43 @@ class MessagesResource:
         headers: Dict[str, str] = {"X-Cueapi-From-Agent": from_agent}
         if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
+        if auto_verify:
+            # Phase 2 of body-verify defense in depth. When this header is
+            # set, the substrate echoes the body it received in the 201
+            # response under the ``body_received`` field. SDK then diffs
+            # sent vs received + raises BodyVerifyMismatchError on drift.
+            # Substrate ignores the header when Layer 1 isn't deployed
+            # yet; SDK no-ops on missing response field. Backward-compat.
+            headers["X-CueAPI-Verify-Echo"] = "true"
 
-        return self._client._post("/v1/messages", json=payload, headers=headers)
+        response = self._client._post("/v1/messages", json=payload, headers=headers)
+
+        # Verify echo if requested. The substrate-side echo lands in
+        # response[_VERIFY_ECHO_FIELD] when Layer 1 is deployed; absent
+        # otherwise (no-op in that case).
+        if auto_verify and isinstance(response, dict):
+            received = response.get(_VERIFY_ECHO_FIELD)
+            if received is not None and received != body:
+                msg_id = response.get("id", "<unknown>")
+                divergence = first_divergence_byte(body, received)
+                if divergence == -1 and len(body) != len(received):
+                    # One body is a proper prefix of the other; length
+                    # mismatch is the signal. Report at boundary of the
+                    # shorter body.
+                    divergence = min(len(body), len(received))
+                raise BodyVerifyMismatchError(
+                    f"Body received by substrate ({len(received)} bytes) differs from "
+                    f"body sent ({len(body)} bytes); first divergence at byte "
+                    f"{divergence}. Likely cause: caller-side shell expansion of "
+                    f"$(...) / backticks / ${{VAR}} in the body arg before Python "
+                    f"received it. Mitigations: pass body via file (Path.read_text) "
+                    f"or use --message-file in cueapi-cli.",
+                    sent_body=body,
+                    received_body=received,
+                    first_divergence_byte=divergence,
+                    message_id=msg_id,
+                )
+        return response
 
     def get(self, msg_id: str) -> dict:
         """Get a single message by ID."""

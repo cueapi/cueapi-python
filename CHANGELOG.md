@@ -6,6 +6,7 @@ All notable changes to cueapi-sdk will be documented here.
 
 ### Added
 
+- **`client.messages.send(auto_verify=True)` body-verify defense (Mike directive 2026-05-11).** New `auto_verify` kwarg, default `True`. When set, the SDK sends `X-CueAPI-Verify-Echo: true` request header. Substrate-side (Phase 1; cueapi-core's lane) echoes the body it received back in the response under `body_received`. SDK diffs sent vs received and raises `BodyVerifyMismatchError` on drift (with `sent_body`, `received_body`, `first_divergence_byte`, `message_id` attributes for programmatic recovery / diagnostic output). Catches the caller-side shell-expansion bug class where `body=f"... {dynamic_var} ..."` or worse `body=os.popen(...)` silently mutated body content upstream. Opt-out via `auto_verify=False` for perf-sensitive flows. Backward-compat: SDK no-ops when substrate omits the echo field (pre-Layer-1 behavior unchanged). New helper: `cueapi.exceptions.first_divergence_byte(a, b)` returns the byte index of the first differing position (pure function; re-usable cross-SDK).
 - `client.cues.bulk_delete(ids)` — delete up to 100 cues in a single call. Returns `{"deleted": [...], "skipped": [...]}`. Per-ID atomic, not batch atomic. Sends `X-Confirm-Destructive: true` header automatically. Wraps `POST /v1/cues/bulk-delete` (cueapi #650). Parity port of cueapi-cli #46. Raises `ValueError` client-side on empty list or > 100 IDs.
 
 ## [0.2.0] - 2026-05-01
