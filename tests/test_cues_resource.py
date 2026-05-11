@@ -6,6 +6,12 @@ from cueapi.resources.cues import CuesResource
 
 
 class TestFire:
+    """Default ``auto_verify=True`` adds X-CueAPI-Verify-Echo header on every
+    call (Phase 2 of body-verify defense in depth; Mike directive 2026-05-11).
+    TestFireAutoVerify class below pins the verify behavior explicitly."""
+
+    _VERIFY_HEADER = {"X-CueAPI-Verify-Echo": "true"}
+
     def test_fire_no_payload_override(self):
         mock_client = MagicMock()
         mock_client._post.return_value = {"id": "exec_test", "status": "queued"}
@@ -13,7 +19,9 @@ class TestFire:
 
         result = resource.fire("cue_abc123")
 
-        mock_client._post.assert_called_once_with("/v1/cues/cue_abc123/fire", json={})
+        mock_client._post.assert_called_once_with(
+            "/v1/cues/cue_abc123/fire", json={}, headers=self._VERIFY_HEADER,
+        )
         assert result["id"] == "exec_test"
 
     def test_fire_with_payload_override_only(self):
@@ -27,6 +35,7 @@ class TestFire:
         mock_client._post.assert_called_once_with(
             "/v1/cues/cue_abc123/fire",
             json={"payload_override": payload},
+            headers=self._VERIFY_HEADER,
         )
 
     def test_fire_with_payload_override_and_merge_strategy(self):
@@ -40,7 +49,82 @@ class TestFire:
         mock_client._post.assert_called_once_with(
             "/v1/cues/cue_abc123/fire",
             json={"payload_override": payload, "merge_strategy": "replace"},
+            headers=self._VERIFY_HEADER,
         )
+
+
+class TestFireAutoVerify:
+    """Phase 2 cues fire auto-verify (Mike body-verify directive 2026-05-11).
+
+    Mirrors MessagesResource.send pattern. Substrate echoes back the request
+    body bytes under body_received + sha256 hex under body_received_sha256.
+    SDK compares + raises BodyVerifyMismatchError on drift.
+    """
+
+    def test_default_adds_verify_echo_header(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "exec_x"}
+        resource = CuesResource(mock_client)
+
+        resource.fire("cue_abc")
+
+        headers = mock_client._post.call_args.kwargs.get("headers", {})
+        assert headers.get("X-CueAPI-Verify-Echo") == "true"
+
+    def test_opt_out_omits_header(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "exec_x"}
+        resource = CuesResource(mock_client)
+
+        resource.fire("cue_abc", auto_verify=False)
+
+        headers = mock_client._post.call_args.kwargs.get("headers", {})
+        assert "X-CueAPI-Verify-Echo" not in headers
+
+    def test_byte_identical_sha256_passes(self):
+        """When server's body_received_sha256 matches client's computed
+        sha256, send() returns response normally (constant-cost path)."""
+        import hashlib
+        import json
+        # Compute expected sha256 of the canonical request body
+        body_payload = {"payload_override": {"task": "test"}}
+        expected_sha = hashlib.sha256(
+            json.dumps(body_payload, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "exec_x",
+            "body_received": json.dumps(body_payload, separators=(",", ":")),
+            "body_received_sha256": expected_sha,
+        }
+        resource = CuesResource(mock_client)
+
+        result = resource.fire("cue_abc", payload_override={"task": "test"})
+
+        assert result["id"] == "exec_x"
+
+    def test_no_op_when_substrate_omits_echo_field(self):
+        """Pre-Layer-1 substrate omits body_received → no raise."""
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "exec_x"}
+        resource = CuesResource(mock_client)
+
+        result = resource.fire("cue_abc")
+
+        assert result["id"] == "exec_x"
+
+    def test_opt_out_skips_verify_even_if_substrate_echoes(self):
+        """auto_verify=False: even if substrate sends body_received, don't check."""
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "exec_x",
+            "body_received": "completely different body",
+        }
+        resource = CuesResource(mock_client)
+
+        result = resource.fire("cue_abc", auto_verify=False)
+
+        assert result["id"] == "exec_x"
 
     def test_fire_omits_merge_strategy_when_not_passed(self):
         # When the caller omits merge_strategy, the wrapper must NOT send a
