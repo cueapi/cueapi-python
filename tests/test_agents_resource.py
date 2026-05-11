@@ -270,3 +270,183 @@ class TestPresence:
         r.presence("foo@me")
 
         mock_client._get.assert_called_once_with("/v1/agents/foo@me/presence")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Event-emit primitive (PR-1b) — subscriptions + events
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestSubscriptionsCreate:
+    def test_pull_subscription_minimal(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "sub_uuid",
+            "agent_id": "agt_x",
+            "event_type": "message.received",
+            "delivery_target": "pull",
+        }
+        r = AgentsResource(mock_client)
+
+        r.subscriptions_create(
+            "agt_x",
+            event_type="message.received",
+            delivery_target="pull",
+        )
+
+        mock_client._post.assert_called_once_with(
+            "/v1/agents/agt_x/subscriptions",
+            json={
+                "event_type": "message.received",
+                "delivery_target": "pull",
+            },
+        )
+
+    def test_webhook_subscription_with_url(self):
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "sub_uuid",
+            "delivery_target": "webhook",
+            "webhook_secret": "wsec_oneshot",
+        }
+        r = AgentsResource(mock_client)
+
+        r.subscriptions_create(
+            "agt_x",
+            event_type="message.received",
+            delivery_target="webhook",
+            webhook_url="https://example.com/hook",
+        )
+
+        mock_client._post.assert_called_once_with(
+            "/v1/agents/agt_x/subscriptions",
+            json={
+                "event_type": "message.received",
+                "delivery_target": "webhook",
+                "webhook_url": "https://example.com/hook",
+            },
+        )
+
+    def test_webhook_url_omitted_when_none(self):
+        # webhook_url is optional; default None must NOT appear in the
+        # body (server's MessageCreate-style schemas are extra="forbid"
+        # but more importantly: a null/absent webhook_url for a pull sub
+        # should not even reach the wire as None).
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "sub_uuid"}
+        r = AgentsResource(mock_client)
+
+        r.subscriptions_create(
+            "agt_x",
+            event_type="message.received",
+            delivery_target="pull",
+            webhook_url=None,
+        )
+
+        body = mock_client._post.call_args.kwargs["json"]
+        assert "webhook_url" not in body
+
+
+class TestSubscriptionsList:
+    def test_get_path(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"subscriptions": []}
+        r = AgentsResource(mock_client)
+
+        r.subscriptions_list("agt_x")
+
+        mock_client._get.assert_called_once_with("/v1/agents/agt_x/subscriptions")
+
+    def test_slug_form_ref(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"subscriptions": []}
+        r = AgentsResource(mock_client)
+
+        r.subscriptions_list("foo@me")
+
+        mock_client._get.assert_called_once_with("/v1/agents/foo@me/subscriptions")
+
+
+class TestSubscriptionsDelete:
+    def test_delete_path(self):
+        mock_client = MagicMock()
+        mock_client._delete.return_value = {"status": "detached"}
+        r = AgentsResource(mock_client)
+
+        r.subscriptions_delete("agt_x", "sub-uuid-1234")
+
+        mock_client._delete.assert_called_once_with(
+            "/v1/agents/agt_x/subscriptions/sub-uuid-1234"
+        )
+
+
+class TestEventsPull:
+    def test_defaults_only_limit(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"events": [], "next_cursor": 0}
+        r = AgentsResource(mock_client)
+
+        r.events_pull("agt_x")
+
+        mock_client._get.assert_called_once_with(
+            "/v1/agents/agt_x/events",
+            params={"limit": 100},
+        )
+
+    def test_with_since_cursor(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"events": [], "next_cursor": 42}
+        r = AgentsResource(mock_client)
+
+        r.events_pull("agt_x", since=42)
+
+        mock_client._get.assert_called_once_with(
+            "/v1/agents/agt_x/events",
+            params={"limit": 100, "since": 42},
+        )
+
+    def test_with_event_type_filter(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"events": [], "next_cursor": 0}
+        r = AgentsResource(mock_client)
+
+        r.events_pull("agt_x", event_type="message.received")
+
+        mock_client._get.assert_called_once_with(
+            "/v1/agents/agt_x/events",
+            params={"limit": 100, "event_type": "message.received"},
+        )
+
+    def test_with_all_params(self):
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"events": [], "next_cursor": 100}
+        r = AgentsResource(mock_client)
+
+        r.events_pull(
+            "agt_x",
+            since=50,
+            limit=500,
+            event_type="message.received",
+        )
+
+        mock_client._get.assert_called_once_with(
+            "/v1/agents/agt_x/events",
+            params={
+                "limit": 500,
+                "since": 50,
+                "event_type": "message.received",
+            },
+        )
+
+    def test_since_zero_explicit_passed(self):
+        # Distinct from default None — explicit since=0 should send it.
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"events": [], "next_cursor": 0}
+        r = AgentsResource(mock_client)
+
+        r.events_pull("agt_x", since=0)
+
+        mock_client._get.assert_called_once_with(
+            "/v1/agents/agt_x/events",
+            params={"limit": 100, "since": 0},
+        )
