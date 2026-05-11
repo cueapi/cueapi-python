@@ -6,11 +6,12 @@ from cueapi.resources.cues import CuesResource
 
 
 class TestFire:
-    """Default ``auto_verify=True`` adds X-CueAPI-Verify-Echo header on every
-    call (Phase 2 of body-verify defense in depth; Mike directive 2026-05-11).
-    TestFireAutoVerify class below pins the verify behavior explicitly."""
-
-    _VERIFY_HEADER = {"X-CueAPI-Verify-Echo": "true"}
+    """Default ``auto_verify=False`` for ``CuesResource.fire`` — substrate's
+    /v1/cues/{id}/fire echoes a pydantic-after-parse body that may include
+    server-side default-population, causing spurious diff vs caller's
+    canonical-JSON serialization. Until field-by-field echo semantic is
+    locked with cueapi-primary, fire's auto_verify is opt-in via explicit
+    kwarg. TestFireAutoVerify class below pins the opt-in verify behavior."""
 
     def test_fire_no_payload_override(self):
         mock_client = MagicMock()
@@ -20,7 +21,7 @@ class TestFire:
         result = resource.fire("cue_abc123")
 
         mock_client._post.assert_called_once_with(
-            "/v1/cues/cue_abc123/fire", json={}, headers=self._VERIFY_HEADER,
+            "/v1/cues/cue_abc123/fire", json={}, headers={},
         )
         assert result["id"] == "exec_test"
 
@@ -35,7 +36,7 @@ class TestFire:
         mock_client._post.assert_called_once_with(
             "/v1/cues/cue_abc123/fire",
             json={"payload_override": payload},
-            headers=self._VERIFY_HEADER,
+            headers={},
         )
 
     def test_fire_with_payload_override_and_merge_strategy(self):
@@ -49,7 +50,7 @@ class TestFire:
         mock_client._post.assert_called_once_with(
             "/v1/cues/cue_abc123/fire",
             json={"payload_override": payload, "merge_strategy": "replace"},
-            headers=self._VERIFY_HEADER,
+            headers={},
         )
 
 
@@ -61,7 +62,10 @@ class TestFireAutoVerify:
     SDK compares + raises BodyVerifyMismatchError on drift.
     """
 
-    def test_default_adds_verify_echo_header(self):
+    def test_default_off_omits_verify_echo_header(self):
+        """auto_verify defaults to False on fire (substrate echo semantics
+        not yet locked for /v1/cues/{id}/fire; opt-in until field-by-field
+        semantic confirmed with cueapi-primary)."""
         mock_client = MagicMock()
         mock_client._post.return_value = {"id": "exec_x"}
         resource = CuesResource(mock_client)
@@ -69,21 +73,22 @@ class TestFireAutoVerify:
         resource.fire("cue_abc")
 
         headers = mock_client._post.call_args.kwargs.get("headers", {})
-        assert headers.get("X-CueAPI-Verify-Echo") == "true"
+        assert "X-CueAPI-Verify-Echo" not in headers
 
-    def test_opt_out_omits_header(self):
+    def test_opt_in_adds_verify_echo_header(self):
         mock_client = MagicMock()
         mock_client._post.return_value = {"id": "exec_x"}
         resource = CuesResource(mock_client)
 
-        resource.fire("cue_abc", auto_verify=False)
+        resource.fire("cue_abc", auto_verify=True)
 
         headers = mock_client._post.call_args.kwargs.get("headers", {})
-        assert "X-CueAPI-Verify-Echo" not in headers
+        assert headers.get("X-CueAPI-Verify-Echo") == "true"
 
     def test_byte_identical_sha256_passes(self):
         """When server's body_received_sha256 matches client's computed
-        sha256, send() returns response normally (constant-cost path)."""
+        sha256, send() returns response normally (constant-cost path).
+        Requires explicit auto_verify=True since fire defaults to off."""
         import hashlib
         import json
         # Compute expected sha256 of the canonical request body
@@ -99,22 +104,26 @@ class TestFireAutoVerify:
         }
         resource = CuesResource(mock_client)
 
-        result = resource.fire("cue_abc", payload_override={"task": "test"})
+        result = resource.fire(
+            "cue_abc", payload_override={"task": "test"}, auto_verify=True
+        )
 
         assert result["id"] == "exec_x"
 
     def test_no_op_when_substrate_omits_echo_field(self):
-        """Pre-Layer-1 substrate omits body_received → no raise."""
+        """Pre-Layer-1 substrate (or default-off path) omits echo → no raise."""
         mock_client = MagicMock()
         mock_client._post.return_value = {"id": "exec_x"}
         resource = CuesResource(mock_client)
 
-        result = resource.fire("cue_abc")
+        result = resource.fire("cue_abc", auto_verify=True)
 
         assert result["id"] == "exec_x"
 
-    def test_opt_out_skips_verify_even_if_substrate_echoes(self):
-        """auto_verify=False: even if substrate sends body_received, don't check."""
+    def test_default_off_skips_verify_even_if_substrate_echoes(self):
+        """Default auto_verify=False: even if substrate sends body_received
+        (e.g. caller targets a different SDK that opted in), this call
+        doesn't check. Pins the default-off invariant."""
         mock_client = MagicMock()
         mock_client._post.return_value = {
             "id": "exec_x",
@@ -122,7 +131,7 @@ class TestFireAutoVerify:
         }
         resource = CuesResource(mock_client)
 
-        result = resource.fire("cue_abc", auto_verify=False)
+        result = resource.fire("cue_abc")  # default auto_verify=False
 
         assert result["id"] == "exec_x"
 

@@ -285,7 +285,7 @@ class CuesResource:
         send_at: Optional[Union[str, datetime]] = None,
         exit_criteria: Optional[List[str]] = None,
         idempotency_key: Optional[str] = None,
-        auto_verify: bool = True,
+        auto_verify: bool = False,
     ) -> Dict[str, Any]:
         """Fire an existing cue, optionally overriding payload + scheduling.
 
