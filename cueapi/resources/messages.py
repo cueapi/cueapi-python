@@ -132,28 +132,40 @@ class MessagesResource:
 
         response = self._client._post("/v1/messages", json=payload, headers=headers)
 
-        # Verify echo if requested. The substrate-side echo lands in
-        # response[_VERIFY_ECHO_FIELD] when Layer 1 is deployed; absent
-        # otherwise (no-op in that case).
+        # Verify echo if requested. Empirically-locked wire shape (probed
+        # 2026-05-11 ~23:17Z): substrate echoes back the PARSED request
+        # body as a dict under ``body_received``. To diff the message
+        # body specifically, extract ``body_received.body`` (str) and
+        # compare against the str the caller sent.
+        #
+        # Backward-compat: pre-Layer-1 substrate omits ``body_received``
+        # entirely → SDK no-ops. Also defensive: if a future substrate
+        # rev returns body_received as a flat string (per the original
+        # spec text), the .get("body") chain returns None gracefully via
+        # the isinstance check, falling through to no-op rather than
+        # raising spuriously.
         if auto_verify and isinstance(response, dict):
-            received = response.get(_VERIFY_ECHO_FIELD)
-            if received is not None and received != body:
+            received_dict = response.get(_VERIFY_ECHO_FIELD)
+            received_body: Optional[str] = None
+            if isinstance(received_dict, dict):
+                received_body = received_dict.get("body")
+            elif isinstance(received_dict, str):
+                # Defensive: future substrate rev may flatten the echo.
+                received_body = received_dict
+            if received_body is not None and received_body != body:
                 msg_id = response.get("id", "<unknown>")
-                divergence = first_divergence_byte(body, received)
-                if divergence == -1 and len(body) != len(received):
-                    # One body is a proper prefix of the other; length
-                    # mismatch is the signal. Report at boundary of the
-                    # shorter body.
-                    divergence = min(len(body), len(received))
+                divergence = first_divergence_byte(body, received_body)
+                if divergence == -1 and len(body) != len(received_body):
+                    divergence = min(len(body), len(received_body))
                 raise BodyVerifyMismatchError(
-                    f"Body received by substrate ({len(received)} bytes) differs from "
+                    f"Body received by substrate ({len(received_body)} bytes) differs from "
                     f"body sent ({len(body)} bytes); first divergence at byte "
                     f"{divergence}. Likely cause: caller-side shell expansion of "
                     f"$(...) / backticks / ${{VAR}} in the body arg before Python "
                     f"received it. Mitigations: pass body via file (Path.read_text) "
                     f"or use --message-file in cueapi-cli.",
                     sent_body=body,
-                    received_body=received,
+                    received_body=received_body,
                     first_divergence_byte=divergence,
                     message_id=msg_id,
                 )
