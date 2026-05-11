@@ -236,12 +236,18 @@ class TestAutoVerify:
         assert "X-CueAPI-Verify-Echo" not in headers
 
     def test_byte_identical_response_returns_normally(self):
-        """When server echoes back the same body, send() returns response."""
+        """body_received.body matches sent body → success.
+
+        Empirically-locked wire shape (probed 2026-05-11 ~23:17Z):
+        substrate echoes back PARSED request body as dict under
+        ``body_received``, NOT a flat string. SDK extracts
+        ``body_received.body`` to compare against sent body.
+        """
         mock_client = MagicMock()
         mock_client._post.return_value = {
             "id": "msg_x",
             "delivery_state": "queued",
-            "body_received": "hi",
+            "body_received": {"to": "y", "body": "hi", "subject": None, "priority": 3},
         }
         r = MessagesResource(mock_client)
 
@@ -250,14 +256,19 @@ class TestAutoVerify:
         assert result["id"] == "msg_x"
 
     def test_raises_on_body_mismatch(self):
-        """When server echo differs from sent body, raises BodyVerifyMismatchError."""
+        """body_received.body differs from sent body → raises BodyVerifyMismatchError."""
         from cueapi.exceptions import BodyVerifyMismatchError
 
         mock_client = MagicMock()
         mock_client._post.return_value = {
             "id": "msg_mutated",
             "delivery_state": "queued",
-            "body_received": "body with INJECT (caller's shell command-substituted)",
+            "body_received": {
+                "to": "y",
+                "body": "body with INJECT (caller's shell command-substituted)",
+                "subject": None,
+                "priority": 3,
+            },
         }
         r = MessagesResource(mock_client)
 
@@ -286,13 +297,28 @@ class TestAutoVerify:
     def test_opt_out_skips_verify_even_if_substrate_echoes(self):
         """auto_verify=False: even if substrate sends body_received, don't check."""
         mock_client = MagicMock()
-        # Mismatched echo but opt-out → no exception
         mock_client._post.return_value = {
-            "id": "msg_x", "body_received": "DIFFERENT BODY",
+            "id": "msg_x",
+            "body_received": {"to": "y", "body": "DIFFERENT BODY"},
         }
         r = MessagesResource(mock_client)
 
         result = r.send(from_agent="x", to="y", body="hi", auto_verify=False)
+
+        assert result["id"] == "msg_x"
+
+    def test_defensive_accepts_flat_string_body_received(self):
+        """Defensive: if a future substrate rev flattens body_received
+        back to a string (per the original spec wording), SDK still
+        verifies correctly. Belt + suspenders for spec drift."""
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "msg_x",
+            "body_received": "hi",  # flat-string variant
+        }
+        r = MessagesResource(mock_client)
+
+        result = r.send(from_agent="x", to="y", body="hi")
 
         assert result["id"] == "msg_x"
 
