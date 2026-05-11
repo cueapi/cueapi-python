@@ -240,3 +240,119 @@ class AgentsResource:
             Presence dict.
         """
         return self._client._get(f"/v1/agents/{ref}/presence")
+
+    # ───────────────────────────────────────────────────────────────
+    # Event-emit primitive (PR-1b)
+    # ───────────────────────────────────────────────────────────────
+
+    def subscriptions_create(
+        self,
+        ref: str,
+        *,
+        event_type: str,
+        delivery_target: str,
+        webhook_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a subscription for an agent (PR-1b event-emit primitive).
+
+        Subscriptions are agent-scoped — an agent can only subscribe to
+        events FOR ITSELF. The caller must own the agent.
+
+        Args:
+            ref: Agent opaque ID or slug-form (the subscribing agent).
+            event_type: The event type to subscribe to (e.g.
+                ``message.received``).
+            delivery_target: ``"pull"`` (poll via ``events_pull``) or
+                ``"webhook"`` (server POSTs to ``webhook_url`` with HMAC).
+            webhook_url: Required when ``delivery_target="webhook"``;
+                HTTPS only. Ignored for pull subscriptions.
+
+        Returns:
+            Subscription dict. For webhook subscriptions, the response
+            includes ``webhook_secret`` ONE-TIME — save it now; the
+            server never re-exposes it.
+
+        Errors:
+            400 ``unknown_event_type`` / ``invalid_delivery_target`` /
+            ``invalid_webhook_url``; 404 ``agent_not_found``.
+        """
+        body: Dict[str, Any] = {
+            "event_type": event_type,
+            "delivery_target": delivery_target,
+        }
+        if webhook_url is not None:
+            body["webhook_url"] = webhook_url
+        return self._client._post(f"/v1/agents/{ref}/subscriptions", json=body)
+
+    def subscriptions_list(self, ref: str) -> Dict[str, Any]:
+        """List active subscriptions for an agent (PR-1b).
+
+        ``webhook_url`` is redacted to host-only in the response;
+        ``webhook_secret`` is never exposed here (only on create).
+        Each entry includes dispatch-state fields
+        (``last_dispatched_event_id``, ``consecutive_failures``,
+        ``paused_until``, etc).
+
+        Args:
+            ref: Agent opaque ID or slug-form.
+
+        Returns:
+            Dict with ``subscriptions`` list.
+        """
+        return self._client._get(f"/v1/agents/{ref}/subscriptions")
+
+    def subscriptions_delete(self, ref: str, subscription_id: str) -> Dict[str, Any]:
+        """Soft-detach a subscription (PR-1b). Idempotent.
+
+        Re-DELETE on an already-detached subscription returns 200
+        regardless. The server does NOT delete the row — it marks it
+        detached so dispatch stops + audit history is preserved.
+
+        Args:
+            ref: Agent opaque ID or slug-form (must match the
+                subscription's owning agent).
+            subscription_id: UUID of the subscription to detach.
+
+        Returns:
+            Result dict.
+        """
+        return self._client._delete(
+            f"/v1/agents/{ref}/subscriptions/{subscription_id}"
+        )
+
+    def events_pull(
+        self,
+        ref: str,
+        *,
+        since: Optional[int] = None,
+        limit: int = 100,
+        event_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Pull events from the agent's event stream (PR-1b).
+
+        Events are append-only with a monotonic ``id`` (BIGSERIAL).
+        Use ``since`` as a cursor: pass the last ``id`` you saw to
+        get only events newer than that. Default 0 fetches from the
+        beginning.
+
+        Args:
+            ref: Agent opaque ID or slug-form.
+            since: Cursor — only return events with ``id > since``.
+                Default 0 (all events). Pass the highest ``id`` from
+                the previous page to continue.
+            limit: Page size (default 100, server caps at 1000).
+            event_type: Optional filter — only return events of this
+                type. Omit for all event types.
+
+        Returns:
+            Dict with ``events`` list (each carrying ``id``,
+            ``event_type``, ``payload``, ``emitted_at``) and
+            ``next_cursor`` (highest ``id`` in this page; pass back as
+            ``since`` for the next call).
+        """
+        params: Dict[str, Any] = {"limit": limit}
+        if since is not None:
+            params["since"] = since
+        if event_type is not None:
+            params["event_type"] = event_type
+        return self._client._get(f"/v1/agents/{ref}/events", params=params)
