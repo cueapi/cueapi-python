@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
+from cueapi.exceptions import BodyVerifyMismatchError, first_divergence_byte
 from cueapi.models.cue import Cue, CueList
 
 if TYPE_CHECKING:
     from cueapi.client import CueAPI
+
+# Phase 2 of body-verify defense in depth (Mike directive 2026-05-11).
+# Substrate echoes the request body bytes back in body_received (str)
+# + body_received_sha256 (64-hex SHA256 of the same bytes) when the
+# X-CueAPI-Verify-Echo: true request header is set. Field names locked
+# during joint design (CMA + cueapi-primary) on Dock workspace
+# cue-message-silent-corruption-substrate-design-2026-05-11.
+_VERIFY_ECHO_BODY_FIELD = "body_received"
+_VERIFY_ECHO_SHA256_FIELD = "body_received_sha256"
 
 
 class CuesResource:
@@ -273,6 +285,7 @@ class CuesResource:
         send_at: Optional[Union[str, datetime]] = None,
         exit_criteria: Optional[List[str]] = None,
         idempotency_key: Optional[str] = None,
+        auto_verify: bool = False,
     ) -> Dict[str, Any]:
         """Fire an existing cue, optionally overriding payload + scheduling.
 
@@ -344,4 +357,83 @@ class CuesResource:
         if idempotency_key is not None:
             body["idempotency_key"] = idempotency_key
 
-        return self._client._post(f"/v1/cues/{cue_id}/fire", json=body)
+        # Phase 2 of body-verify defense in depth (Mike directive 2026-05-11).
+        # Substrate echoes request body bytes back as body_received (str) +
+        # body_received_sha256 (64-hex SHA256) when X-CueAPI-Verify-Echo:
+        # true header is set. We compute the same SHA256 client-side over
+        # our request body JSON + compare hex (constant cost) — falls back
+        # to string compare on body_received string if available. Mirrors
+        # MessagesResource.send auto_verify pattern.
+        headers: Dict[str, str] = {}
+        sent_body_bytes: Optional[bytes] = None
+        if auto_verify:
+            headers["X-CueAPI-Verify-Echo"] = "true"
+            # Pre-compute canonical JSON bytes for the verify-echo
+            # comparison. Server hashes the body bytes it received;
+            # this client hashes the body bytes we send. Match should
+            # be byte-identical if no transport-layer mutation occurred.
+            sent_body_bytes = json.dumps(body, separators=(",", ":")).encode("utf-8")
+
+        response = self._client._post(
+            f"/v1/cues/{cue_id}/fire", json=body, headers=headers
+        )
+
+        # Verify echo if requested. Defensive isinstance handles both
+        # current substrate (flat string post-fix 2026-05-11 ~23:48Z)
+        # and the earlier dict-shape variant + the no-echo backward-
+        # compat path.
+        if auto_verify and isinstance(response, dict) and sent_body_bytes is not None:
+            received_raw = response.get(_VERIFY_ECHO_BODY_FIELD)
+            received_str: Optional[str] = None
+            if isinstance(received_raw, str):
+                received_str = received_raw
+            elif isinstance(received_raw, dict):
+                # Pre-fix wire shape: serialize for compare. Future-
+                # proof in case any deployment still ships the dict.
+                received_str = json.dumps(received_raw, separators=(",", ":"))
+
+            # Prefer constant-cost SHA256 comparison when both server +
+            # client compute the same digest. Falls back to string
+            # compare if the sha field is absent.
+            sha_field = response.get(_VERIFY_ECHO_SHA256_FIELD)
+            mismatch_detected = False
+            if isinstance(sha_field, str) and len(sha_field) == 64:
+                # Server's sha256 hashes the raw request bytes it
+                # received. We compute over our locally-serialized
+                # bytes. JSON-canonicalization differences (key order,
+                # whitespace) could cause spurious mismatch — so on
+                # sha mismatch, fall back to string-compare which is
+                # more forgiving on serialization differences.
+                client_sha = hashlib.sha256(sent_body_bytes).hexdigest()
+                if client_sha != sha_field:
+                    # SHA mismatch — verify with string compare; if THAT
+                    # also fails, it's a real divergence.
+                    if received_str is not None and received_str != json.dumps(
+                        body, separators=(",", ":")
+                    ):
+                        mismatch_detected = True
+            else:
+                # No sha field; compare body_received string vs our
+                # canonical body JSON.
+                if received_str is not None and received_str != json.dumps(
+                    body, separators=(",", ":")
+                ):
+                    mismatch_detected = True
+
+            if mismatch_detected and received_str is not None:
+                exec_id = response.get("id", "<unknown>")
+                sent_str = json.dumps(body, separators=(",", ":"))
+                divergence = first_divergence_byte(sent_str, received_str)
+                if divergence == -1 and len(sent_str) != len(received_str):
+                    divergence = min(len(sent_str), len(received_str))
+                raise BodyVerifyMismatchError(
+                    f"Cue fire body received by substrate ({len(received_str)} bytes) differs "
+                    f"from body sent ({len(sent_str)} bytes); first divergence at byte "
+                    f"{divergence}. Likely cause: caller-side mutation of payload_override or "
+                    f"send_at fields before reaching the SDK. Inspect the dict you constructed.",
+                    sent_body=sent_str,
+                    received_body=received_str,
+                    first_divergence_byte=divergence,
+                    message_id=exec_id,  # execution id for fire (NOT message id)
+                )
+        return response
