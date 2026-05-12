@@ -346,6 +346,67 @@ class TestSubscriptionsCreate:
         body = mock_client._post.call_args.kwargs["json"]
         assert "webhook_url" not in body
 
+    def test_inline_body_omitted_when_none(self):
+        # Server-side default is False; sending an unset kwarg should
+        # NOT put the field on the wire (avoid payload noise for
+        # callers who don't care about body embedding).
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "sub_uuid"}
+        r = AgentsResource(mock_client)
+
+        r.subscriptions_create(
+            "agt_x",
+            event_type="message.received",
+            delivery_target="pull",
+        )
+
+        body = mock_client._post.call_args.kwargs["json"]
+        assert "inline_body" not in body
+
+    def test_inline_body_true_passes_through(self):
+        # Opt-in: inline_body=True embeds message.body on emitted events
+        # (server Item 1, hosted PR #791).
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "sub_uuid",
+            "delivery_target": "pull",
+            "inline_body": True,
+        }
+        r = AgentsResource(mock_client)
+
+        r.subscriptions_create(
+            "agt_x",
+            event_type="message.received",
+            delivery_target="pull",
+            inline_body=True,
+        )
+
+        body = mock_client._post.call_args.kwargs["json"]
+        assert body["inline_body"] is True
+
+    def test_inline_body_false_explicit_passes_through(self):
+        # Explicit False (distinct from None / unset) — caller may want
+        # to force the no-embed contract on a per-subscription basis.
+        # We pass it through verbatim; server treats False the same as
+        # the schema default but explicit is non-noisy.
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "sub_uuid",
+            "delivery_target": "pull",
+            "inline_body": False,
+        }
+        r = AgentsResource(mock_client)
+
+        r.subscriptions_create(
+            "agt_x",
+            event_type="message.received",
+            delivery_target="pull",
+            inline_body=False,
+        )
+
+        body = mock_client._post.call_args.kwargs["json"]
+        assert body["inline_body"] is False
+
 
 class TestSubscriptionsList:
     def test_get_path(self):

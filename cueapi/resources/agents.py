@@ -252,6 +252,7 @@ class AgentsResource:
         event_type: str,
         delivery_target: str,
         webhook_url: Optional[str] = None,
+        inline_body: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Create a subscription for an agent (PR-1b event-emit primitive).
 
@@ -266,11 +267,22 @@ class AgentsResource:
                 ``"webhook"`` (server POSTs to ``webhook_url`` with HMAC).
             webhook_url: Required when ``delivery_target="webhook"``;
                 HTTPS only. Ignored for pull subscriptions.
+            inline_body: Opt into body embedding on emitted events
+                (server Item 1, hosted PR #791). When ``True``, the source
+                message body is embedded in the event payload as
+                ``payload.body`` — eliminates the extra
+                ``GET /v1/messages/{id}`` round-trip on the consumer side.
+                Bodies > 32KB are NOT embedded; instead the payload carries
+                ``payload.body_omitted = "size_too_large"`` and
+                ``payload.body_size_bytes = N`` so consumers can fall back
+                to the fetch. Default ``None`` means "don't send the field"
+                — server default is ``False``.
 
         Returns:
             Subscription dict. For webhook subscriptions, the response
             includes ``webhook_secret`` ONE-TIME — save it now; the
-            server never re-exposes it.
+            server never re-exposes it. Both pull and webhook responses
+            surface ``inline_body`` so list-callers can observe own state.
 
         Errors:
             400 ``unknown_event_type`` / ``invalid_delivery_target`` /
@@ -282,6 +294,8 @@ class AgentsResource:
         }
         if webhook_url is not None:
             body["webhook_url"] = webhook_url
+        if inline_body is not None:
+            body["inline_body"] = inline_body
         return self._client._post(f"/v1/agents/{ref}/subscriptions", json=body)
 
     def subscriptions_list(self, ref: str) -> Dict[str, Any]:
