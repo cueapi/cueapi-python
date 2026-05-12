@@ -6,8 +6,8 @@
     "app/routers/",
     "app/schemas/"
   ],
-  "last_full_audit": "2026-05-07",
-  "sdk_version_at_audit": "0.2.x",
+  "last_full_audit": "2026-05-12",
+  "sdk_version_at_audit": "0.2.x (head; pre-0.3.0 cut — heavy PR-1b + body-verify + inline_body activity 2026-05-09 → 2026-05-12)",
   "audit_methodology": "Walk every endpoint in private cueapi/app/routers/ and check coverage in cueapi/resources/. For each covered endpoint, walk the corresponding schemas/*.py to verify field-level coverage in cueapi/models/. Drift goes in `missing_endpoints` or `missing_fields` keyed by endpoint.",
   "audit_cadence": "Monthly full sweep. Per-PR diffs handled via the .github/pull_request_template.md `Parity Impact` section in the private repo.",
 
@@ -20,7 +20,7 @@
     "DELETE /v1/cues/{id}": {"sdk": "client.cues.delete"},
     "POST /v1/cues/{id} (pause)": {"sdk": "client.cues.pause"},
     "POST /v1/cues/{id} (resume)": {"sdk": "client.cues.resume"},
-    "POST /v1/cues/{id}/fire": {"sdk": "client.cues.fire (PR #23; in-flight kwargs send_at + exit_criteria + idempotency_key in #33)"},
+    "POST /v1/cues/{id}/fire": {"sdk": "client.cues.fire (PR #23; send_at + exit_criteria + idempotency_key shipped in #33 on 2026-05-09)"},
     "POST /v1/executions/{id}/outcome": {"sdk": "client.executions.report_outcome"},
     "GET /v1/executions": {"sdk": "client.executions.list"},
     "GET /v1/executions/{id}": {"sdk": "client.executions.get"},
@@ -42,12 +42,16 @@
     "GET /v1/agents/{ref}/webhook-secret": {"sdk": "client.agents.get_webhook_secret (PR #27)"},
     "GET /v1/agents/{ref}/inbox": {"sdk": "client.agents.inbox (PR #27)"},
     "GET /v1/agents/{ref}/sent": {"sdk": "client.agents.sent (PR #27)"},
-    "GET /v1/agents/roster": {"sdk": "client.agents.roster (in-flight PR #35; cueapi #630 parity)"},
-    "GET /v1/agents/{ref}/presence": {"sdk": "client.agents.presence (in-flight PR #35; cueapi #662 parity)"},
-    "POST /v1/messages": {"sdk": "client.messages.send (PR #28; in-flight send_at kwarg in #34)"},
+    "GET /v1/agents/roster": {"sdk": "client.agents.roster (PR #35; cueapi #630 parity, shipped 2026-05-09)"},
+    "GET /v1/agents/{ref}/presence": {"sdk": "client.agents.presence (PR #35; cueapi #662 parity, shipped 2026-05-09)"},
+    "POST /v1/messages": {"sdk": "client.messages.send (PR #28; send_at shipped in #34 on 2026-05-09; auto_verify body-verify Phase 2 shipped in #39 + #40 on 2026-05-11 — defense against caller-side shell expansion, cueapi/cueapi#795 + #798 parity)"},
     "GET /v1/messages/{id}": {"sdk": "client.messages.get (PR #28)"},
     "POST /v1/messages/{id}/read": {"sdk": "client.messages.mark_read (PR #28)"},
-    "POST /v1/messages/{id}/ack": {"sdk": "client.messages.ack (PR #28)"}
+    "POST /v1/messages/{id}/ack": {"sdk": "client.messages.ack (PR #28)"},
+    "POST /v1/agents/{ref}/subscriptions": {"sdk": "client.agents.subscriptions_create (PR #38, PR-1b event-emit primitive, shipped 2026-05-11; inline_body kwarg shipped in PR #42 on 2026-05-12, cueapi/cueapi#791 / Item 1 parity)"},
+    "GET /v1/agents/{ref}/subscriptions": {"sdk": "client.agents.subscriptions_list (PR #38, shipped 2026-05-11)"},
+    "DELETE /v1/agents/{ref}/subscriptions/{sub_id}": {"sdk": "client.agents.subscriptions_delete (PR #38, shipped 2026-05-11)"},
+    "GET /v1/agents/{ref}/events": {"sdk": "client.agents.events_pull (PR #38, shipped 2026-05-11)"}
   },
 
   "endpoints_missing": {
@@ -62,11 +66,20 @@
     "POST /v1/executions/{id}/live-claim (cueapi #664)": {"blocker": "P0 Live-claim attestation endpoint. Handler-runtime concern, not SDK control-plane. Re-evaluate if SDK users build live-attached handlers in Python."}
   },
 
-  "in_flight_ports_2026_05_07": {
-    "PR #33 (open)": "client.cues.fire(send_at, exit_criteria, idempotency_key) — covers cueapi #618 + #632 + #683",
-    "PR #34 (open)": "client.messages.send(send_at) — covers cueapi #623",
-    "PR #35 (open)": "client.agents.roster() + client.agents.presence() — covers cueapi #630 + #662",
-    "PR #30 (open, lane-flagged with cueapi-main)": "client.cues.fire(send_at) — narrower scope of #33"
+  "ports_shipped_2026_05_08_to_2026_05_12": {
+    "PR #30 (closed superseded by #33)": "client.cues.fire(send_at) — closed unmerged in favor of #33's broader scope",
+    "PR #31 (merged 2026-05-11)": "Execution + Worker + Agent + Message additive Pydantic model classes (drift backfill)",
+    "PR #33 (merged 2026-05-09)": "client.cues.fire(send_at, exit_criteria, idempotency_key) — covers cueapi #618 + #632 + #683",
+    "PR #34 (merged 2026-05-09)": "client.messages.send(send_at) — covers cueapi #623",
+    "PR #35 (merged 2026-05-09)": "client.agents.roster() + client.agents.presence() — covers cueapi #630 + #662",
+    "PR #38 (merged 2026-05-11)": "client.agents.subscriptions_create/list/delete + events_pull — PR-1b event-emit primitive, covers cueapi/cueapi #731 (substrate ports as cueapi-core #71)",
+    "PR #39 (merged 2026-05-11)": "client.messages.send(auto_verify=True default) — Phase 2 body-verify defense-in-depth, covers cueapi/cueapi #795",
+    "PR #40 (merged 2026-05-11)": "messages.send body_received-is-dict isinstance fix — cueapi/cueapi #797 dict-shape window",
+    "PR #42 (merged 2026-05-12)": "client.agents.subscriptions_create(inline_body=...) — covers cueapi/cueapi #791 (Item 1)"
+  },
+
+  "ports_in_flight_2026_05_12": {
+    "comment": "Empty as of audit time. Future port candidates (already filed as Backlog rows): cueapi-action Phase 2 verify wiring (might already be in by #14/#15 ports); cueapi-mcp body-verify Phase 2 just shipped as cueapi-mcp#35."
   },
 
   "model_drift": {
