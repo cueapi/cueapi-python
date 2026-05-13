@@ -206,6 +206,83 @@ class TestSendAt:
         assert "send_at" not in call.kwargs["json"]
 
 
+class TestLiveFallbackMode:
+    """Agent-id-split refactor Layer 4 (cueapi #824) — live_fallback_mode kwarg.
+
+    Per-message override for substrate's Live-fallback semantic. ``live_only``
+    queues until the target Live agent's session is actively heartbeating;
+    ``fallback_to_background`` falls through to the Live-sibling's BG parent
+    when Live is silent. Default-omit when None so wire format matches
+    pre-Layer-4 callers; server applies its default
+    (``fallback_to_background`` per spec lock 22:11Z 2026-05-12).
+
+    Backlog row cmp2zi9tl001w04jxcxw3ank1 tracks the cueapi-core OSS port;
+    hosted accepts; cueapi-core 422 until precursors land (graceful
+    degradation).
+    """
+
+    def test_live_fallback_mode_omitted_when_none(self):
+        """Default None ⇒ field NOT on wire (preserves pre-Layer-4 shape)."""
+        from unittest.mock import MagicMock
+        from cueapi.resources.messages import MessagesResource
+
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "msg_x", "delivery_state": "queued"}
+        r = MessagesResource(mock_client)
+
+        r.send(from_agent="sender@x", to="recipient@y", body="hi")
+
+        call = mock_client._post.call_args
+        assert "live_fallback_mode" not in call.kwargs["json"]
+
+    def test_live_fallback_mode_live_only_passes_through(self):
+        """``live_only`` flows verbatim into the request body."""
+        from unittest.mock import MagicMock
+        from cueapi.resources.messages import MessagesResource
+
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "msg_x", "delivery_state": "queued"}
+        r = MessagesResource(mock_client)
+
+        r.send(
+            from_agent="sender@x",
+            to="recipient@y",
+            body="hi",
+            live_fallback_mode="live_only",
+        )
+
+        mock_client._post.assert_called_once_with(
+            "/v1/messages",
+            json={
+                "to": "recipient@y",
+                "body": "hi",
+                "live_fallback_mode": "live_only",
+            },
+            headers={"X-Cueapi-From-Agent": "sender@x", "X-CueAPI-Verify-Echo": "true"},
+        )
+
+    def test_live_fallback_mode_fallback_to_background_passes_through(self):
+        """``fallback_to_background`` flows verbatim. Explicit-default value
+        is wired-out so callers can disambiguate "I explicitly want fallback"
+        from "I didn't specify"."""
+        from unittest.mock import MagicMock
+        from cueapi.resources.messages import MessagesResource
+
+        mock_client = MagicMock()
+        mock_client._post.return_value = {"id": "msg_x", "delivery_state": "queued"}
+        r = MessagesResource(mock_client)
+
+        r.send(
+            from_agent="sender@x",
+            to="recipient@y",
+            body="hi",
+            live_fallback_mode="fallback_to_background",
+        )
+
+        call = mock_client._post.call_args
+        assert call.kwargs["json"]["live_fallback_mode"] == "fallback_to_background"
+
+
 class TestAutoVerify:
     """Phase 2 of body-verify defense in depth (Mike directive 2026-05-11).
 
