@@ -48,6 +48,72 @@ class TestCreate:
             },
         )
 
+    def test_parent_agent_id_omitted_when_none(self):
+        """Agent-id-split refactor Layer 4 (cueapi #823). Default None ⇒
+        field NOT on wire (preserves pre-Layer-4 shape — BG agent is the
+        canonical entry point)."""
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "agt_x", "slug": "team-comm", "display_name": "Team Comm",
+            "status": "online",
+        }
+        r = AgentsResource(mock_client)
+
+        r.create(display_name="Team Comm")
+
+        call = mock_client._post.call_args
+        assert "parent_agent_id" not in call.kwargs["json"]
+
+    def test_parent_agent_id_passes_through(self):
+        """Caller supplies parent_agent_id ⇒ flows into request body
+        verbatim. Substrate (hosted) interprets as a Live-sibling create
+        + auto-derives ``<parent_slug>-live`` when slug omitted; cueapi-core
+        OSS 422s until precursors land (graceful degradation per spec)."""
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "agt_live_x", "slug": "team-comm-live",
+            "display_name": "Team Comm Live", "status": "online",
+            "parent_agent_id": "agt_bg_parent",
+        }
+        r = AgentsResource(mock_client)
+
+        r.create(
+            display_name="Team Comm Live",
+            parent_agent_id="agt_bg_parent",
+        )
+
+        mock_client._post.assert_called_once_with(
+            "/v1/agents",
+            json={
+                "display_name": "Team Comm Live",
+                "parent_agent_id": "agt_bg_parent",
+            },
+        )
+
+    def test_parent_agent_id_combines_with_other_optionals(self):
+        """Live-sibling create with explicit slug (Q5 labeled-session
+        convention) — parent_agent_id + slug + webhook combine cleanly
+        in the body."""
+        mock_client = MagicMock()
+        mock_client._post.return_value = {
+            "id": "agt_live_label", "slug": "team-comm-live-debug",
+        }
+        r = AgentsResource(mock_client)
+
+        r.create(
+            display_name="Team Comm Live (debug)",
+            slug="team-comm-live-debug",
+            webhook_url="https://x.example/live-hook",
+            parent_agent_id="agt_bg_parent",
+        )
+
+        call = mock_client._post.call_args
+        body = call.kwargs["json"]
+        assert body["parent_agent_id"] == "agt_bg_parent"
+        assert body["slug"] == "team-comm-live-debug"
+        assert body["webhook_url"] == "https://x.example/live-hook"
+        assert body["display_name"] == "Team Comm Live (debug)"
+
 
 class TestList:
     def test_defaults_omit_filters(self):

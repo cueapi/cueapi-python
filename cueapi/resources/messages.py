@@ -46,6 +46,7 @@ class MessagesResource:
         idempotency_key: Optional[str] = None,
         send_at: Optional[Union[str, datetime]] = None,
         auto_verify: bool = True,
+        live_fallback_mode: Optional[str] = None,
     ) -> dict:
         """Send a message.
 
@@ -87,6 +88,19 @@ class MessagesResource:
                 is delivered immediately. Per-message scheduling landed
                 in cueapi #623 — server stores ``send_at`` on the
                 message row and the worker picks it up when due.
+            live_fallback_mode: Per-message override for the agent-id-
+                split refactor's Live-fallback semantic (cueapi #824,
+                Layer 4). ``"live_only"`` queues the message until the
+                target Live agent's session is actively heartbeating;
+                ``"fallback_to_background"`` falls through to the
+                Live-sibling's BG parent (via ``parent_agent_id``) when
+                the Live session is silent. Default ``None`` omits the
+                field from the wire body (server default applies —
+                ``"fallback_to_background"`` per spec lock 22:11Z
+                2026-05-12). The field is currently accepted by hosted
+                cueapi; OSS cueapi-core rejects with 422 until the
+                Layer 4 OSS port lands (graceful degradation; tracked
+                on Backlog row cmp2zi9tl001w04jxcxw3ank1).
 
         Returns:
             Dict matching the server's ``MessageResponse`` shape.
@@ -117,6 +131,13 @@ class MessagesResource:
             payload["send_at"] = (
                 send_at.isoformat() if isinstance(send_at, datetime) else send_at
             )
+        if live_fallback_mode is not None:
+            # Per agent-id-split Layer 4 (cueapi #824). Default-omit when
+            # caller didn't specify so wire format matches pre-Layer-4
+            # callers; server applies its own default
+            # (``fallback_to_background`` per spec lock 22:11Z 2026-05-12).
+            # Hosted accepts; cueapi-core OSS will 422 until precursors land.
+            payload["live_fallback_mode"] = live_fallback_mode
 
         headers: Dict[str, str] = {"X-Cueapi-From-Agent": from_agent}
         if idempotency_key is not None:

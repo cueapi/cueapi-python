@@ -29,6 +29,7 @@ class AgentsResource:
         slug: Optional[str] = None,
         webhook_url: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        parent_agent_id: Optional[str] = None,
     ) -> dict:
         """Create an agent.
 
@@ -44,11 +45,25 @@ class AgentsResource:
             webhook_url: Push-delivery target. SSRF-validated. Omit for
                 poll-only.
             metadata: Optional JSON metadata blob.
+            parent_agent_id: Optional ``agt_<12-alphanumeric>`` linking
+                this new agent to a BG parent (agent-id-split refactor
+                Layer 4, cueapi #823). NULL = BG agent (the default
+                shape — canonical entry point for a project's
+                coordination address). Supplying it makes this a Live
+                sibling. Substrate enforces: parent must be same-tenant
+                + must NOT itself be a Live sibling (1-level hierarchy).
+                When supplied without an explicit ``slug``, server
+                auto-derives ``<parent_slug>-live`` (with collision-
+                suffix). Currently accepted by hosted cueapi; OSS
+                cueapi-core rejects with 422 until the Layer 4 OSS
+                port lands (graceful degradation; tracked on Backlog
+                row cmp2zi9tl001w04jxcxw3ank1).
 
         Returns:
             Dict matching the server's ``AgentResponse`` shape, including
             ``webhook_secret`` ONCE on this response if ``webhook_url``
-            was given.
+            was given. The response surfaces ``parent_agent_id`` —
+            NULL for BG agents, non-NULL for Live siblings.
         """
         body: Dict[str, Any] = {"display_name": display_name}
         if slug is not None:
@@ -57,6 +72,12 @@ class AgentsResource:
             body["webhook_url"] = webhook_url
         if metadata is not None:
             body["metadata"] = metadata
+        if parent_agent_id is not None:
+            # Per agent-id-split Layer 4 (cueapi #823). Default-omit so
+            # wire format matches pre-Layer-4 callers; server treats
+            # absent === NULL (BG agent — the default shape).
+            # Hosted accepts; cueapi-core OSS will 422 until precursors land.
+            body["parent_agent_id"] = parent_agent_id
         return self._client._post("/v1/agents", json=body)
 
     def list(
